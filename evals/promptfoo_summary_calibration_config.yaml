@@ -1,0 +1,10 @@
+description: Calibrate LLM judge against human pass/fail summary labels
+
+prompts:
+  - "{{generated_summary}}"
+
+providers:
+  - id: file://calibration_provider.py
+    label: calibration-summary-echo
+
+tests: file://summary_calibration_generate_tests.py:generate_tests

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  deterministic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check src/ tests/ evals/ --line-length=100
+
+      - name: Deterministic eval suite
+        run: bash scripts/run_deterministic_evals.sh
+
+  summary-eval:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Summary judge unit tests
+        run: uv run pytest tests/test_summary_cases.py tests/test_summary_judge.py -q
+
+      - name: Summary eval suite (Promptfoo)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: bash scripts/run_summary_evals.sh
+
+      - name: Log summary eval batch
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run python scripts/log_summary_eval_results.py
+
+      - name: Upload eval log
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-outputs-jsonl
+          path: evals/model_outputs.jsonl
+          if-no-files-found: warn

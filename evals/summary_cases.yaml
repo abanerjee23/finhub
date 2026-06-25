@@ -1,0 +1,272 @@
+# Golden expectations for model-graded agent_summary evals.
+# Automation source of truth: this file (10 docs).
+# Human labels for DOC-1001, DOC-1002, DOC-1006: AI Evals_SM5_v0.6.xlsx (Golden_Dataset tab).
+# DOC-1003–1005 and DOC-1007–1010 were cloned from those three policy patterns and
+# validated by the LLM judge. Sync Excel manually if you want full human parity.
+
+cases:
+  - id: summary-doc-1001
+    description: DOC-1001 missing GL master data needs approval before reprocess
+    document_id: DOC-1001
+    approve: false
+    golden:
+      approval_required: true
+      expected_status: needs_approval
+      expected_reason_code: MD_GL_ACCOUNT_MASTER_DATA_MISSING
+      expected_action: create_target_master_data
+      required_follow_on: maintain_source_mapping
+      root_cause_expected: >-
+        GL master data is missing in the target system. Hence, the financial
+        document could not be posted in the target system.
+      must_mention:
+        - GL account missing in target system
+        - approval is required before re-processing
+        - source to target mapping must be maintained before re-processing
+      must_not_say:
+        - re-process without approval
+        - missing mapping is the root cause
+      example_good_summary: >-
+        Document posting failed because GL account master data is missing in the
+        target system. The document has not been reprocessed yet and requires
+        approval before target master data can be created. After approval is
+        recorded, create the required GL account master data, maintain the
+        source to target mapping with the newly created GL master data and then
+        reprocess the document.
+
+  - id: summary-doc-1002
+    description: DOC-1002 missing cost center mapping requires manual mapping maintenance, then reprocess
+    document_id: DOC-1002
+    approve: false
+    golden:
+      approval_required: false
+      expected_status: reprocessed
+      expected_reason_code: MP_COST_CENTER_SOURCE_TO_TARGET_MAPPING_MISSING
+      expected_action: maintain_source_mapping
+      required_follow_on: not applicable
+      root_cause_expected: >-
+        Missing source to target mapping for the concerned cost center resulted
+        in document posting failure
+      must_mention:
+        - cost center source to target mapping is missing
+        - maintain the mapping manually in the target mapping table
+        - reprocess the document
+        - no approval required
+      must_not_say:
+        - create cost center master data
+        - re-processing requires approval
+        - system automatically updated the mapping table
+        - auto-remediated
+      example_good_summary: >-
+        Document posting failed because the cost center source-to-target mapping
+        is missing. Maintain the missing mapping entry manually in the target
+        mapping table, then reprocess the document. No approval is required.
+
+  - id: summary-doc-1003
+    description: DOC-1003 missing vendor master data needs approval before reprocess
+    document_id: DOC-1003
+    approve: false
+    golden:
+      approval_required: true
+      expected_status: needs_approval
+      expected_reason_code: MD_VENDOR_MASTER_DATA_MISSING
+      expected_action: create_target_master_data
+      required_follow_on: maintain_source_mapping
+      root_cause_expected: >-
+        Vendor master data is missing in the target system, so the document
+        could not be posted.
+      must_mention:
+        - vendor master data is missing
+        - approval is required before re-processing
+      must_not_say:
+        - re-process without approval
+        - missing mapping is the root cause
+      example_good_summary: >-
+        Document posting failed because vendor master data is missing in the
+        target system. The document has not been reprocessed yet and requires
+        approval before target master data can be created. After approval is
+        recorded, create the required vendor master data, maintain the source
+        to target mapping, and then reprocess the document.
+
+  - id: summary-doc-1004
+    description: DOC-1004 missing GL mapping requires manual mapping maintenance, then reprocess
+    document_id: DOC-1004
+    approve: false
+    golden:
+      approval_required: false
+      expected_status: reprocessed
+      expected_reason_code: MP_GL_ACCOUNT_SOURCE_TO_TARGET_MAPPING_MISSING
+      expected_action: maintain_source_mapping
+      required_follow_on: not applicable
+      root_cause_expected: >-
+        Missing source to target GL account mapping resulted in document
+        posting failure
+      must_mention:
+        - GL account source to target mapping is missing
+        - maintain the mapping manually in the target mapping table
+        - reprocess the document
+        - no approval required
+      must_not_say:
+        - create GL account master data
+        - re-processing requires approval
+        - system automatically updated the mapping table
+        - auto-remediated
+      example_good_summary: >-
+        Document posting failed because the GL account source-to-target mapping
+        is missing. Maintain the missing mapping entry manually in the target
+        mapping table, then reprocess the document. No approval is required.
+
+  - id: summary-doc-1005
+    description: DOC-1005 missing cost center master data needs approval before reprocess
+    document_id: DOC-1005
+    approve: false
+    golden:
+      approval_required: true
+      expected_status: needs_approval
+      expected_reason_code: MD_COST_CENTER_MASTER_DATA_MISSING
+      expected_action: create_target_master_data
+      required_follow_on: maintain_source_mapping
+      root_cause_expected: >-
+        Cost center master data is missing in the target system, so the document
+        could not be posted.
+      must_mention:
+        - cost center master data is missing
+        - approval is required before re-processing
+      must_not_say:
+        - re-process without approval
+        - missing mapping is the root cause
+      example_good_summary: >-
+        Document posting failed because cost center master data is missing in the
+        target system. The document has not been reprocessed yet and requires
+        approval before target master data can be created. After approval is
+        recorded, create the required cost center master data, maintain the
+        source to target mapping, and then reprocess the document.
+
+  - id: summary-doc-1006
+    description: DOC-1006 closed posting period stays blocked
+    document_id: DOC-1006
+    approve: false
+    golden:
+      approval_required: true
+      expected_status: blocked
+      expected_reason_code: DC_POSTING_PERIOD_CLOSED
+      expected_action: external_controller_action_required
+      required_follow_on: not applicable
+      root_cause_expected: >-
+        Document could not be posted in the target system as the posting period
+        to which the document belonged has been closed in the target system.
+      must_mention:
+        - closed posting period
+        - review required before posting period can be re-opened
+      must_not_say:
+        - review not needed
+      example_good_summary: >-
+        Document processing failed because the posting period is closed in the
+        target system. The document is blocked and has not been reprocessed.
+        Escalate to the responsible controller to review and reopen the posting
+        period externally before retrying.
+
+  - id: summary-doc-1007
+    description: DOC-1007 missing profit center mapping requires manual mapping maintenance, then reprocess
+    document_id: DOC-1007
+    approve: false
+    golden:
+      approval_required: false
+      expected_status: reprocessed
+      expected_reason_code: MP_PROFIT_CENTER_SOURCE_TO_TARGET_MAPPING_MISSING
+      expected_action: maintain_source_mapping
+      required_follow_on: not applicable
+      root_cause_expected: >-
+        Missing source to target profit center mapping resulted in document
+        posting failure
+      must_mention:
+        - profit center source to target mapping is missing
+        - maintain the mapping manually in the target mapping table
+        - reprocess the document
+        - no approval required
+      must_not_say:
+        - create profit center master data
+        - re-processing requires approval
+        - system automatically updated the mapping table
+        - auto-remediated
+      example_good_summary: >-
+        Document posting failed because the profit center source-to-target
+        mapping is missing. Maintain the missing mapping entry manually in the
+        target mapping table, then reprocess the document. No approval is required.
+
+  - id: summary-doc-1008
+    description: DOC-1008 missing profit center master data needs approval before reprocess
+    document_id: DOC-1008
+    approve: false
+    golden:
+      approval_required: true
+      expected_status: needs_approval
+      expected_reason_code: MD_PROFIT_CENTER_MASTER_DATA_MISSING
+      expected_action: create_target_master_data
+      required_follow_on: maintain_source_mapping
+      root_cause_expected: >-
+        Profit center master data is missing in the target system, so the
+        document could not be posted.
+      must_mention:
+        - profit center master data is missing
+        - approval is required before re-processing
+      must_not_say:
+        - re-process without approval
+        - missing mapping is the root cause
+      example_good_summary: >-
+        Document posting failed because profit center master data is missing in
+        the target system. The document has not been reprocessed yet and
+        requires approval before target master data can be created. After
+        approval is recorded, create the required profit center master data,
+        maintain the source to target mapping, and then reprocess the document.
+
+  - id: summary-doc-1009
+    description: DOC-1009 missing customer master data needs approval before reprocess
+    document_id: DOC-1009
+    approve: false
+    golden:
+      approval_required: true
+      expected_status: needs_approval
+      expected_reason_code: MD_CUSTOMER_MASTER_DATA_MISSING
+      expected_action: create_target_master_data
+      required_follow_on: maintain_source_mapping
+      root_cause_expected: >-
+        Customer master data is missing in the target system, so the document
+        could not be posted.
+      must_mention:
+        - customer master data is missing
+        - approval is required before re-processing
+      must_not_say:
+        - re-process without approval
+        - missing mapping is the root cause
+      example_good_summary: >-
+        Document posting failed because customer master data is missing in the
+        target system. The document has not been reprocessed yet and requires
+        approval before target master data can be created. After approval is
+        recorded, create the required customer master data, maintain the source
+        to target mapping, and then reprocess the document.
+
+  - id: summary-doc-1010
+    description: DOC-1010 missing asset master data needs approval before reprocess
+    document_id: DOC-1010
+    approve: false
+    golden:
+      approval_required: true
+      expected_status: needs_approval
+      expected_reason_code: MD_ASSET_MASTER_DATA_MISSING
+      expected_action: create_target_master_data
+      required_follow_on: maintain_source_mapping
+      root_cause_expected: >-
+        Asset master data is missing in the target system, so the document
+        could not be posted.
+      must_mention:
+        - asset master data is missing
+        - approval is required before re-processing
+      must_not_say:
+        - re-process without approval
+        - missing mapping is the root cause
+      example_good_summary: >-
+        Document posting failed because asset master data is missing in the
+        target system. The document has not been reprocessed yet and requires
+        approval before target master data can be created. After approval is
+        recorded, create the required asset master data, maintain the source to
+        target mapping, and then reprocess the document.

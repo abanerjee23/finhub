@@ -1,0 +1,13 @@
+description: Agentic CFIN agent_summary model-graded evals (LLM judge)
+
+prompts:
+  - "{{document_id}}"
+
+providers:
+  - id: file://summary_provider.py
+    label: summary-cfin-workflow
+
+tests: file://summary_generate_tests.py:generate_tests
+
+# Judge logic: evals/summary_assertions.py:expect_summary_judge
+# Uses golden fields from evals/summary_cases.yaml and dual gate rule (accuracy >= 4 AND actionability >= 4).

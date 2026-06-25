@@ -1,0 +1,8 @@
+{
+  "gl_accounts": ["T-500000", "T-600000", "T-700000"],
+  "profit_centers": ["PC-TGT-SALES", "PC-TGT-OPS", "PC-TGT-MFG"],
+  "cost_centers": ["CC-TGT-SALES", "CC-TGT-OPS", "CC-TGT-MFG"],
+  "business_partners": ["BP-TGT-ACME", "BP-TGT-GLOBEX", "BP-TGT-INITECH"],
+  "open_periods": ["2026-05", "2026-06"],
+  "posted_source_refs": []
+}

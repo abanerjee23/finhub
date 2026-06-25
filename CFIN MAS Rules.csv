@@ -1,0 +1,11 @@
+Document,Failure Type,Reason Code
+DOC-1002,Cost center source to target mapping missing,MP_COST_CENTER_SOURCE_TO_TARGET_MAPPING_MISSING
+DOC-1004,GL account source to target mapping missing,MP_GL_ACCOUNT_SOURCE_TO_TARGET_MAPPING_MISSING
+DOC-1007,Profit center source to target mapping missing,MP_PROFIT_CENTER_SOURCE_TO_TARGET_MAPPING_MISSING
+DOC-1001,GL account master data missing,MD_GL_ACCOUNT_MASTER_DATA_MISSING
+DOC-1005,Cost center master data missing,MD_COST_CENTER_MASTER_DATA_MISSING
+DOC-1008,Profit center master data missing,MD_PROFIT_CENTER_MASTER_DATA_MISSING
+DOC-1003,Vendor master data is missing,MD_VENDOR_MASTER_DATA_MISSING
+DOC-1009,Customer master data is missing,MD_CUSTOMER_MASTER_DATA_MISSING
+DOC-1010,Asset master data is missing,MD_ASSET_MASTER_DATA_MISSING
+DOC-1006,Posting period closed,DC_POSTING_PERIOD_CLOSED

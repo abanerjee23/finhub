@@ -1,0 +1,10 @@
+description: Agentic CFIN deterministic workflow evals (exact structured checks, DISABLE_LLM=1)
+
+prompts:
+  - "{{document_id}}"
+
+providers:
+  - id: file://provider.py
+    label: deterministic-cfin-workflow
+
+tests: file://generate_tests.py:generate_tests

@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+.env
+
+.promptfoo/*
+!.promptfoo/.gitkeep
+
+evals/model_outputs.jsonl
+.DS_Store
+**/__pycache__/
+evals/__pycache__/

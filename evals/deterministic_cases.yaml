@@ -1,0 +1,228 @@
+# Single source of truth for deterministic workflow evals.
+# Drives pytest parametrization and Promptfoo test generation.
+# Covers all 10 failure types from the MAS Rules specification.
+
+cases:
+  # --- SOURCE-TO-TARGET MAPPING MISSING (manual mapping maintenance, no approval) ---
+
+  - id: gl_source_mapping_missing_mapping_maintenance
+    description: GL source-to-target mapping maintenance allowed — reprocessed
+    document_id: DOC-1004
+    approve: false
+    expected:
+      status: reprocessed
+      failure_scenario: gl_source_mapping_missing
+      reason_code: MP_GL_ACCOUNT_SOURCE_TO_TARGET_MAPPING_MISSING
+      action: maintain_source_mapping
+      requires_approval: false
+      allowed: true
+      reprocessed: true
+    audit:
+      must_include:
+        - { actor: intake_agent, action: document_loaded }
+        - { actor: diagnosis_agent, action: diagnosis_completed }
+        - { actor: remediation_planner, action: plan_created }
+        - { actor: governance_agent, action: policy_evaluated }
+        - { actor: reprocessing_controller, action: reprocess_executed }
+      must_exclude:
+        - { actor: human_approver, action: approval_recorded }
+
+  - id: cost_center_source_mapping_missing_mapping_maintenance
+    description: Cost center source-to-target mapping maintenance allowed — reprocessed
+    document_id: DOC-1002
+    approve: false
+    expected:
+      status: reprocessed
+      failure_scenario: cost_center_source_mapping_missing
+      reason_code: MP_COST_CENTER_SOURCE_TO_TARGET_MAPPING_MISSING
+      action: maintain_source_mapping
+      requires_approval: false
+      allowed: true
+      reprocessed: true
+    audit:
+      must_include:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+      must_exclude:
+        - { actor: human_approver, action: approval_recorded }
+
+  - id: profit_center_source_mapping_missing_mapping_maintenance
+    description: Profit center source-to-target mapping maintenance allowed — reprocessed
+    document_id: DOC-1007
+    approve: false
+    expected:
+      status: reprocessed
+      failure_scenario: profit_center_source_mapping_missing
+      reason_code: MP_PROFIT_CENTER_SOURCE_TO_TARGET_MAPPING_MISSING
+      action: maintain_source_mapping
+      requires_approval: false
+      allowed: true
+      reprocessed: true
+    audit:
+      must_include:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+      must_exclude:
+        - { actor: human_approver, action: approval_recorded }
+
+  # --- MASTER DATA MISSING (requires approval) ---
+
+  - id: missing_gl_account_master_needs_approval
+    description: GL account master data missing — blocked until approved
+    document_id: DOC-1001
+    approve: false
+    expected:
+      status: needs_approval
+      failure_scenario: missing_gl_account_master
+      reason_code: MD_GL_ACCOUNT_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: false
+      reprocessed: false
+    audit:
+      must_include:
+        - { actor: governance_agent, action: policy_evaluated }
+      must_exclude:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  - id: missing_gl_account_master_approved_reprocesses
+    description: Approved GL account master data creation — reprocesses after approval
+    document_id: DOC-1001
+    approve: true
+    expected:
+      status: reprocessed
+      failure_scenario: missing_gl_account_master
+      reason_code: MD_GL_ACCOUNT_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: true
+      reprocessed: true
+    audit:
+      must_include:
+        - { actor: human_approver, action: approval_recorded }
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  - id: missing_cost_center_master_needs_approval
+    description: Cost center master data missing — blocked until approved
+    document_id: DOC-1005
+    approve: false
+    expected:
+      status: needs_approval
+      failure_scenario: missing_cost_center_master
+      reason_code: MD_COST_CENTER_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: false
+      reprocessed: false
+    audit:
+      must_include:
+        - { actor: governance_agent, action: policy_evaluated }
+      must_exclude:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  - id: missing_profit_center_master_needs_approval
+    description: Profit center master data missing — blocked until approved
+    document_id: DOC-1008
+    approve: false
+    expected:
+      status: needs_approval
+      failure_scenario: missing_profit_center_master
+      reason_code: MD_PROFIT_CENTER_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: false
+      reprocessed: false
+    audit:
+      must_include:
+        - { actor: governance_agent, action: policy_evaluated }
+      must_exclude:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  - id: missing_vendor_needs_approval
+    description: Vendor master data missing — blocked until created and approved
+    document_id: DOC-1003
+    approve: false
+    expected:
+      status: needs_approval
+      failure_scenario: missing_vendor
+      reason_code: MD_VENDOR_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: false
+      reprocessed: false
+    audit:
+      must_include:
+        - { actor: governance_agent, action: policy_evaluated }
+      must_exclude:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  - id: missing_vendor_approved_reprocesses
+    description: Approved vendor master data creation — reprocesses after approval
+    document_id: DOC-1003
+    approve: true
+    expected:
+      status: reprocessed
+      failure_scenario: missing_vendor
+      reason_code: MD_VENDOR_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: true
+      reprocessed: true
+    audit:
+      must_include:
+        - { actor: human_approver, action: approval_recorded }
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  - id: missing_customer_needs_approval
+    description: Customer master data missing — blocked until created and approved
+    document_id: DOC-1009
+    approve: false
+    expected:
+      status: needs_approval
+      failure_scenario: missing_customer
+      reason_code: MD_CUSTOMER_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: false
+      reprocessed: false
+    audit:
+      must_include:
+        - { actor: governance_agent, action: policy_evaluated }
+      must_exclude:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  - id: missing_asset_master_needs_approval
+    description: Asset master data missing — blocked until created and approved
+    document_id: DOC-1010
+    approve: false
+    expected:
+      status: needs_approval
+      failure_scenario: missing_asset_master
+      reason_code: MD_ASSET_MASTER_DATA_MISSING
+      action: create_target_master_data
+      requires_approval: true
+      allowed: false
+      reprocessed: false
+    audit:
+      must_include:
+        - { actor: governance_agent, action: policy_evaluated }
+      must_exclude:
+        - { actor: reprocessing_controller, action: reprocess_executed }
+
+  # --- POSTING PERIOD CLOSED (always blocked, external approval required) ---
+
+  - id: closed_period_blocked
+    description: Posting period closed — always blocked, requires external approval to reopen
+    document_id: DOC-1006
+    approve: false
+    expected:
+      status: blocked
+      failure_scenario: closed_posting_period
+      reason_code: DC_POSTING_PERIOD_CLOSED
+      action: external_controller_action_required
+      requires_approval: true
+      allowed: false
+      reprocessed: false
+    audit:
+      must_include:
+        - { actor: governance_agent, action: policy_evaluated }
+      must_exclude:
+        - { actor: reprocessing_controller, action: reprocess_executed }

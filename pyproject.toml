@@ -1,0 +1,42 @@
+[project]
+name = "agentic-cfin-workflow"
+version = "0.1.0"
+description = "Vendor-neutral Agentic AI prototype for safe Central Finance-style document replication remediation."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langfuse>=3.0.0",
+    "openai-agents>=0.6.0",
+    "openinference-instrumentation-openai-agents>=1.0.0",
+    "pydantic>=2.12.0",
+    "python-dotenv>=1.2.0",
+    "pyyaml>=6.0.0",
+    "streamlit>=1.52.0",
+]
+
+[dependency-groups]
+dev = [
+    "openpyxl>=3.1.5",
+    "pytest>=9.0.0",
+    "ruff>=0.14.0",
+]
+
+[project.scripts]
+cfin-demo = "cfin_agents.cli:main"
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cfin_agents"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

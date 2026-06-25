@@ -1,0 +1,86 @@
+[
+  {
+    "mapping_type": "gl_account",
+    "source_value": "500000",
+    "target_value": "T-500000",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "gl_account",
+    "source_value": "600000",
+    "target_value": "T-600000",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "gl_account",
+    "source_value": "700000",
+    "target_value": "T-700000",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "profit_center",
+    "source_value": "PC-SRC-SALES",
+    "target_value": "PC-TGT-SALES",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "profit_center",
+    "source_value": "PC-SRC-OPS",
+    "target_value": "PC-TGT-OPS",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "profit_center",
+    "source_value": "PC-SRC-MFG",
+    "target_value": "PC-TGT-MFG",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "cost_center",
+    "source_value": "CC-SRC-SALES",
+    "target_value": "CC-TGT-SALES",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "cost_center",
+    "source_value": "CC-SRC-OPS",
+    "target_value": "CC-TGT-OPS",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "cost_center",
+    "source_value": "CC-SRC-MFG",
+    "target_value": "CC-TGT-MFG",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "business_partner",
+    "source_value": "BP-SRC-ACME",
+    "target_value": "BP-TGT-ACME",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "business_partner",
+    "source_value": "BP-SRC-GLOBEX",
+    "target_value": "BP-TGT-GLOBEX",
+    "status": "active",
+    "confidence": 1.0
+  },
+  {
+    "mapping_type": "business_partner",
+    "source_value": "BP-SRC-INITECH",
+    "target_value": "BP-TGT-INITECH",
+    "status": "active",
+    "confidence": 1.0
+  }
+]

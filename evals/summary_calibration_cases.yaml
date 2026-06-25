@@ -1,0 +1,53 @@
+# Fixed summaries with known human pass/fail labels from AI Evals_SM5_v0.6.xlsx Model_Outputs.
+# Used to calibrate the LLM judge before trusting it on live workflow outputs.
+
+cases:
+  - id: calibration-1001-fail
+    document_id: DOC-1001
+    summary_case_id: summary-doc-1001
+    expected_pass: false
+    generated_summary: >-
+      Document posting failed due to missing GL Account. Please re-process the document
+
+  - id: calibration-1001-pass
+    document_id: DOC-1001
+    summary_case_id: summary-doc-1001
+    expected_pass: true
+    generated_summary: >-
+      Document posting failed because GL account master data is missing in the target
+      system. The document has not been reprocessed yet and requires approval before
+      target master data can be created. After approval is recorded, create the
+      required GL account master data, maintain the source to target mapping with the
+      newly created GL master data and then reprocess the document.
+
+  - id: calibration-1002-fail
+    document_id: DOC-1002
+    summary_case_id: summary-doc-1002
+    expected_pass: false
+    generated_summary: >-
+      Document posting failed due to missing cost center. Please re-process the document.
+
+  - id: calibration-1002-pass
+    document_id: DOC-1002
+    summary_case_id: summary-doc-1002
+    expected_pass: true
+    generated_summary: >-
+      Document posting failed because the cost center source-to-target mapping is missing.
+      Maintain the missing mapping entry manually in the target mapping table, then
+      reprocess the document. No approval is required.
+
+  - id: calibration-1006-fail
+    document_id: DOC-1006
+    summary_case_id: summary-doc-1006
+    expected_pass: false
+    generated_summary: >-
+      Document posting failed due to closed posting period. Please re-process the document.
+
+  - id: calibration-1006-pass
+    document_id: DOC-1006
+    summary_case_id: summary-doc-1006
+    expected_pass: true
+    generated_summary: >-
+      Document processing failed because the posting period is closed in the target system.
+      The document is blocked and has not been reprocessed. Escalate to the responsible
+      controller to review and reopen the posting period externally before retrying.
