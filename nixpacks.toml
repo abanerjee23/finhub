@@ -1,14 +1,24 @@
+# Railway/Nixpacks: Python (uv) + Node 20 for frontend build.
+# Do not call `uv sync` manually here — the python provider installs uv and syncs from uv.lock.
+
+providers = ["python"]
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
+NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"
+
 [phases.setup]
 nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = [
-  "uv sync",
   "npm --prefix frontend ci"
 ]
 
 [phases.build]
-cmds = ["npm --prefix frontend run build"]
+cmds = [
+  "npm --prefix frontend run build"
+]
 
 [start]
 cmd = "uv run cfin-api"

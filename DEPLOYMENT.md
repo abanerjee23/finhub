@@ -120,6 +120,7 @@ API_RELOAD=0 uv run cfin-api
 
 - Bundled read-only synthetic data ships in `data/synthetic/`; runtime tickets and attachments use `FINHUB_DATA_DIR`
 - Production frontend uses same-origin `/api` (no separate Vite server); do not set `VITE_API_BASE` unless splitting API and UI
+- **Build troubleshooting:** if deploy logs show `uv: command not found`, ensure `nixpacks.toml` uses `providers = ["python"]` and `NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"` — do not run bare `uv sync` without the Python provider (it installs `uv` from `uv.lock`)
 - Do not put Promptfoo or eval-only keys in Railway unless you intentionally run evals there
 - Rotate any API key that was ever committed to git before making the repo public
 - CLI seed/sweep (`cfin-seed`, `cfin-sweep`) remain available for automation; the UI workbench loop does not require them
