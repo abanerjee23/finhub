@@ -657,8 +657,9 @@ Promptfoo will automate the manual eval process we designed: it runs each test c
 | `evals/summary_cases.yaml` | Machine-readable golden copy for Promptfoo (**10 docs**) |
 | `evals/model_outputs.jsonl` | Append-only log of summary eval judge results |
 | `src/cfin_agents/eval_results.py` | Batch runner, JSONL I/O, optional Excel export |
-| `evals/model_outputs.jsonl` | Append-only log of summary eval judge results |
+| `src/cfin_agents/observability.py` | Langfuse tracing for production/workbench (not used by eval assertions) |
 | `.github/workflows/ci.yml` | CI workflow — see [`CI.md`](CI.md) |
+| `docs/ARCHITECTURE.md` | System architecture, API, observability |
 | `DEPLOYMENT.md` | Railway deployment guide |
 | `evals/deterministic_cases.yaml` | Exact workflow expectations (no LLM judge) |
 | `evals/promptfooconfig.yaml` | Promptfoo config for deterministic evals |

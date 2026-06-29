@@ -34,27 +34,43 @@ Reset & seed queue  →  Run agent processing  →  Triage tickets in UI
 |---------|---------|
 | **Workbench Controls** | Seed count, reset queue, sweep batch size, refresh |
 | **Analytics** | Total/active tickets, status breakdown, owner chart |
-| **Ticket detail** | Agent diagnosis hero, policy context, comments, proof uploads, activity log |
+| **Ticket detail** | Agent diagnosis hero, policy context, comments, proof uploads, activity log, **View trace in Langfuse** (when configured) |
 | **Search Tickets** | Filter and update `operator_status` inline |
 
 Operator statuses: **Assigned**, **In Progress**, **Blocked** (requires comment), **Resolved** (requires proof attachment). Agent policy outcomes (`needs_approval`, `blocked`, etc.) live in `workflow_run` and the diagnosis summary — not as separate status pills.
 
 Architecture details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## CLI Commands
+
+| Command | Agentic? | Purpose |
+|---------|----------|---------|
+| `uv run cfin-demo DOC-1002 [--approve] [--deterministic]` | Yes (default if key set) | Single-document workflow → JSON `WorkflowRun` |
+| `uv run cfin-seed [--count 50] [--reset \| --clear-only]` | — | Seed or clear the SQLite staging queue |
+| `uv run cfin-sweep [--batch-size 5]` | Yes | Claim `NEW` staging rows → agentic workflow → tickets |
+| `uv run cfin-api` | — | FastAPI server (workbench API + production static UI) |
+| `uv run cfin-batch-demo [--count 50]` | **No** | Legacy: seed + **deterministic** diagnose (strips API key during run) |
+| `uv run cfin-refresh-summaries [--dry-run] [--clear-first]` | Uses summary path | Regenerate or clear persisted `agent_summary` on existing tickets |
+
+The **workbench UI** (`Reset & seed` / `Run agent processing`) is the recommended demo path. CLI seed/sweep are equivalent automation hooks.
+
 ## Environment Variables
 
 - `OPENAI_API_KEY`: enables OpenAI Agents SDK execution and analyst summary generation.
 - `OPENAI_MODEL`: model for agent orchestration, defaults to `gpt-4o-mini`.
-- `SUMMARY_MODEL`: model for `agent_summary` generation, defaults to `gpt-4o-mini`.
+- `SUMMARY_MODEL`: model for `agent_summary` generation, defaults to `gpt-4o-mini` (often set to `gpt-4o` for demos).
 - `SUMMARY_USE_LLM`: set to `1` to generate and persist LLM analyst summaries on tickets (recommended for demos).
-- `SUMMARY_JUDGE_MODEL`: model for Promptfoo LLM judge evals, defaults to `gpt-4o`.
+- `SUMMARY_JUDGE_MODEL`: model for Promptfoo LLM judge evals, defaults to `gpt-4o` (evals only).
 - `DISABLE_LLM`: set to `1` to force deterministic execution (no agent orchestration).
 - `FINHUB_DATA_DIR`: directory for SQLite DB and local attachments (default: `data/synthetic`; use a Railway volume path in production).
 - `STORAGE_BACKEND`: `local` (default) or `s3` for attachment blob storage.
 - `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_PREFIX`: S3-compatible storage when `STORAGE_BACKEND=s3`.
-- `LANGFUSE_PUBLIC_KEY`: Langfuse public key.
-- `LANGFUSE_SECRET_KEY`: Langfuse secret key.
-- `LANGFUSE_HOST`: Langfuse host, for example `https://cloud.langfuse.com`.
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`: Langfuse observability (optional).
+- `LANGFUSE_HOST` or `LANGFUSE_BASE_URL`: Langfuse host, e.g. `https://cloud.langfuse.com` (either name works).
+- `API_HOST`, `API_PORT`, `API_RELOAD`: local API server tuning (`PORT` is set automatically on Railway).
+- `VITE_API_BASE`: optional frontend API override (default: same-origin `/api` in dev and production).
+
+See [`.env.example`](.env.example) for the full template.
 
 ## Multi-Agent Workflow
 
@@ -90,7 +106,7 @@ flowchart TB
     REPROCESS[controlled_reprocess tool<br/>only if policy allows]
 
     FINAL[Authoritative deterministic run<br/>locks status, audit, result]
-    SUMMARY[Analyst summary<br/>gpt-4o-mini]
+    SUMMARY[Analyst summary generation<br/>SUMMARY_MODEL]
     OUTPUT[WorkflowRun JSON]
     JUDGE[Promptfoo LLM judge<br/>gpt-4o, eval only]
 
@@ -114,11 +130,25 @@ The Remediation Planner calls `propose_remediation`. It proposes `maintain_sourc
 
 The Governance Agent calls `evaluate_governance`. The policy engine allows the case to proceed because it is a mapping-maintenance issue, not master-data creation and not a closed posting period. It then calls `controlled_reprocess`, which simulates reprocessing under the policy guardrails.
 
-Finally, the deterministic workflow runs as the authoritative final pass and records status, reason code, action, reprocess result, and audit events. `generate_analyst_summary()` then uses `SUMMARY_MODEL` (`gpt-4o-mini`) to write a short analyst-facing explanation, for example:
+Finally, the deterministic workflow runs as the authoritative final pass and records status, reason code, action, reprocess result, and audit events. `generate_analyst_summary()` then writes the analyst-facing explanation — either an LLM summary via `SUMMARY_MODEL` when `SUMMARY_USE_LLM=1`, or eval-aligned deterministic text otherwise. Example:
 
 ```text
 Document posting failed because the cost center source-to-target mapping is missing. Maintain the missing mapping entry manually in the target mapping table, then reprocess the document. No approval is required.
 ```
+
+## Observability (Langfuse)
+
+When Langfuse credentials are configured, each agentic workflow run exports a trace:
+
+| Trace element | Model / source | Purpose |
+|---------------|----------------|---------|
+| Root span `agentic-cfin-workflow` | — | One trace per document run; `session_id=document-{id}` |
+| Agent SDK spans | `OPENAI_MODEL` | Intake, diagnosis, planning, governance tool calls |
+| Generation `analyst-summary` | `SUMMARY_MODEL` | Plain-English analyst summary LLM call |
+
+Trace IDs are stored on `WorkflowRun.langfuse_trace_id` and linked from ticket detail (**View trace in Langfuse**). Health endpoints report Langfuse connectivity: `/api/health`, `/api/workbench/status`.
+
+Implementation: `src/cfin_agents/observability.py` (`workflow_observation`, `summary_generation_observation`, OpenInference OTLP export).
 
 ## CLI Smoke Checks
 
@@ -275,8 +305,8 @@ Required Railway variables:
 - `OPENAI_API_KEY`
 - `FINHUB_DATA_DIR` (recommended — point at a mounted volume, e.g. `/data/finhub`)
 - `SUMMARY_USE_LLM=1` (recommended for LLM analyst summaries in demos)
-- `LANGFUSE_PUBLIC_KEY` (optional)
-- `LANGFUSE_SECRET_KEY` (optional)
-- `LANGFUSE_HOST` (optional)
+- `SUMMARY_MODEL` (optional — e.g. `gpt-4o` for summary generation)
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` (optional observability)
+- `STORAGE_BACKEND` + `S3_*` (optional — S3-compatible attachment storage)
 
-Bundled synthetic documents ship in the image; runtime tickets and attachments need `FINHUB_DATA_DIR` persistence on Railway.
+Bundled synthetic documents ship in the image; runtime tickets and attachments need `FINHUB_DATA_DIR` persistence on Railway. Eval scripts are **not** run on Railway.

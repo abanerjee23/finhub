@@ -70,20 +70,30 @@ Railway uses `/api/health` (configured in `railway.json`). A healthy response in
 {
   "status": "ok",
   "storage_backend": "local",
-  "data_dir": "/data/finhub"
+  "data_dir": "/data/finhub",
+  "langfuse": {
+    "enabled": true,
+    "connected": true,
+    "host": "https://cloud.langfuse.com"
+  }
 }
 ```
+
+If Langfuse variables are not set, `langfuse.enabled` is `false` — that is expected and does not block deployment.
 
 ## 5. Verify the deployment
 
 1. Open the generated Railway URL — the React workbench should load (built `frontend/dist` served by FastAPI).
-2. Confirm `/api/health` returns `ok` and `langfuse.connected: true`.
+2. Confirm `/api/health` returns `"status": "ok"`. If Langfuse is configured, confirm `"langfuse": {"connected": true}`.
 3. In the UI **Workbench Controls** panel:
    - Click **Reset & seed queue**
    - Click **Run agent processing**
    - Confirm tickets appear with agent diagnosis summaries
 4. Open a ticket, add a comment, upload proof on resolve to verify attachment storage.
-5. On ticket detail, click **View trace in Langfuse** to confirm agent spans appear for newly processed documents.
+5. On ticket detail, click **View trace in Langfuse** (when Langfuse is configured) and confirm:
+   - Root span `agentic-cfin-workflow`
+   - Agent SDK spans (`OPENAI_MODEL`)
+   - Generation `analyst-summary` (`SUMMARY_MODEL`) when `SUMMARY_USE_LLM=1`
 
 ## 6. Local dev
 
@@ -109,9 +119,11 @@ API_RELOAD=0 uv run cfin-api
 ## Notes
 
 - Bundled read-only synthetic data ships in `data/synthetic/`; runtime tickets and attachments use `FINHUB_DATA_DIR`
+- Production frontend uses same-origin `/api` (no separate Vite server); do not set `VITE_API_BASE` unless splitting API and UI
 - Do not put Promptfoo or eval-only keys in Railway unless you intentionally run evals there
 - Rotate any API key that was ever committed to git before making the repo public
 - CLI seed/sweep (`cfin-seed`, `cfin-sweep`) remain available for automation; the UI workbench loop does not require them
+- **Legacy API** endpoints (`/api/demo/*`, `/api/jobs/diagnose-new`) exist for scripting; the workbench uses `/api/workbench/*`
 
 ## Related docs
 

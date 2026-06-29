@@ -83,7 +83,12 @@ Orchestrated by `DeterministicWorkflow` in `services.py` / `workflow.py`. Record
 | `CREATE_TARGET_MASTER_DATA` | `needs_approval` | Allowed → reprocess |
 | `EXTERNAL_CONTROLLER_ACTION_REQUIRED` (closed period) | Always `blocked` | — |
 
-After the workflow completes, `generate_analyst_summary()` writes `agent_summary` when `SUMMARY_USE_LLM=1` and `OPENAI_API_KEY` is set; otherwise eval-aligned deterministic text is stored at creation time.
+After the workflow completes, `generate_analyst_summary()` writes `agent_summary`:
+
+- **`SUMMARY_USE_LLM=1` + `OPENAI_API_KEY`:** LLM text via `SUMMARY_MODEL` (exported to Langfuse as `analyst-summary` generation).
+- **Otherwise:** eval-aligned deterministic template from `analyst_summary.py`.
+
+`resolve_agent_summary()` polishes stored text on read and returns `None` for missing or legacy verbose summaries — it does **not** regenerate summaries on read.
 
 ## Ticket and status model
 
@@ -94,7 +99,7 @@ Tickets separate **operator workflow** from **agent policy context** and **inter
 | `operator_status` | Human-editable queue status: `assigned`, `in_progress`, `blocked`, `resolved` |
 | `workflow_run.status` | Agent policy outcome: `needs_approval`, `blocked`, `reprocessed`, etc. (exposed as `workflow_status` in list API) |
 | `policy_summary` | Plain-English policy guidance from agent run |
-| `agent_summary` | LLM analyst diagnosis (persisted at ticket creation; polished on read) |
+| `agent_summary` | Analyst diagnosis text (persisted at ticket creation; polished on read via `resolve_agent_summary()`) |
 | `timeline[]` | Activity log — ingestion, diagnosis, assignment, manual transitions |
 
 Legacy SQLite payloads with `status`, `policy_status`, `is_pending_approval`, `is_blocked` are migrated on read via `ticket_migration.py`.
@@ -124,21 +129,48 @@ On Railway, mount a **volume** and set `FINHUB_DATA_DIR` for durable demos. S3 i
 
 Implementation: `document_store.py`, `attachment_store.py`, `paths.py`, `seed_queue.py`.
 
-## API surface (workbench)
+## API surface
+
+### Workbench (primary)
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/health` | Health + storage backend info |
-| GET | `/api/workbench/status` | Ticket count, staging counts, summary source |
-| POST | `/api/workbench/reset?count=&seed=` | Clear + reseed staging queue |
+| GET | `/api/health` | Health, `storage_backend`, `data_dir`, `langfuse` status |
+| GET | `/api/workbench/status` | Ticket/staging counts, `summary_source`, Langfuse status |
+| POST | `/api/workbench/reset?count=&seed=` | Clear + reseed staging queue (count 1–500) |
 | POST | `/api/workbench/clear` | Clear tickets/staging without reseed |
-| POST | `/api/workbench/sweep` | Process batch from staging → tickets |
-| GET | `/api/tickets` | Filterable ticket list |
-| GET | `/api/tickets/{id}` | Ticket detail (enriched narratives) |
-| POST | `/api/tickets/{id}/transition` | Update `operator_status` |
+| POST | `/api/workbench/sweep` | Process batch from staging → agentic tickets |
+| GET | `/api/tickets` | Filterable list (`status` → `operator_status`, `owner_role`, `priority`, `reason_code`) |
+| GET | `/api/tickets/{id}` | Detail + narratives + `langfuse_trace_url` |
+| PATCH | `/api/tickets/{id}/description` | Edit ticket title/description |
+| POST | `/api/tickets/{id}/transition` | Update `operator_status` (blocked/resolved rules enforced) |
 | POST | `/api/tickets/{id}/comments` | Add comment |
 | POST | `/api/tickets/{id}/attachments` | Upload proof file |
+| GET | `/api/tickets/{id}/attachments/{attachment_id}` | Download/view attachment |
 | GET | `/api/dashboard/summary` | Analytics aggregates |
+| GET | `/api/dashboard/stage-matrix?limit=` | Per-ticket stage durations (API only; UI uses dashboard summary) |
+
+### Legacy demo endpoints
+
+Still present for scripting; the React workbench uses `/api/workbench/*` instead.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/demo/bootstrap` | Reset + **deterministic** batch diagnose → tickets |
+| POST | `/api/demo/fresh-run` | Same as bootstrap (duplicate alias) |
+| POST | `/api/demo/golden-document?document_id=&approve=` | Reset store + single doc through **agentic** workflow |
+| POST | `/api/jobs/diagnose-new` | **Deterministic** diagnose of `NEW` staging rows only |
+
+## CLI commands
+
+| Command | Agentic? | Purpose |
+|---------|----------|---------|
+| `uv run cfin-demo DOC-1002 [--approve] [--deterministic]` | Yes (default) | Single-document workflow |
+| `uv run cfin-seed [--count] [--reset \| --clear-only]` | — | Seed/clear staging queue |
+| `uv run cfin-sweep [--batch-size]` | Yes | Staging → agentic workflow → tickets |
+| `uv run cfin-api` | — | FastAPI server |
+| `uv run cfin-batch-demo` | **No** | Legacy deterministic bootstrap |
+| `uv run cfin-refresh-summaries` | Summary path | Refresh/clear ticket summaries |
 
 ## Frontend structure
 
@@ -149,10 +181,32 @@ Implementation: `document_store.py`, `attachment_store.py`, `paths.py`, `seed_qu
 | **Ticket detail** | Agent diagnosis hero, metadata, status, comments, attachments, activity log |
 | **Search Tickets** | Filters, sortable table, inline status dropdown |
 
-Dev: Vite on `:5173` proxies `/api` → `:8000`.  
-Production: `frontend/dist` served by FastAPI after `npm --prefix frontend run build`.
+Dev: Vite on `:5173` proxies `/api` → `:8000` (same-origin; no `VITE_API_BASE` needed).  
+Production: `frontend/dist` served by FastAPI on one port; API client defaults to same-origin `/api`.
+
+Optional: `VITE_API_BASE` overrides the API host (split deployment only).
 
 Key files: `frontend/src/App.tsx`, `frontend/src/api/client.ts`.
+
+## Observability (Langfuse)
+
+Module: `src/cfin_agents/observability.py`. Graceful no-op when credentials are absent.
+
+| Function | Role |
+|----------|------|
+| `configure_openai_agents_tracing()` | OpenInference instrumentor → OTLP HTTP → Langfuse; initialized in `AgenticWorkflow` |
+| `workflow_observation()` | Root span per run (`agentic-cfin-workflow`); sets `session_id`, tags; yields `trace_id` → `WorkflowRun.langfuse_trace_id` |
+| `summary_generation_observation()` | Langfuse `generation` span (`analyst-summary`) for `SUMMARY_MODEL` LLM call |
+| `langfuse_status()` | Connectivity check for health/workbench endpoints |
+| `langfuse_trace_url()` | `{host}/trace/{id}` linked from ticket detail UI |
+
+Trace hierarchy when Langfuse is enabled:
+
+```text
+agentic-cfin-workflow (root span)
+├── OpenAI Agents SDK spans (OPENAI_MODEL)
+└── analyst-summary (generation, SUMMARY_MODEL)
+```
 
 ## Agent tools
 
@@ -183,16 +237,27 @@ Evals run locally or in GitHub Actions — **not** on the Railway service. See [
 | `sweep.py` | Staging batch → agentic workflow → tickets |
 | `seed_queue.py` | Reset workbench, seed synthetic queue |
 | `analyst_summary.py` | Summary generation, polish, read-time resolution |
+| `observability.py` | Langfuse tracing (workflow + summary generations) |
 | `api.py` | REST API + static frontend in production |
 
 ## Deployment topology (Railway)
 
-Single Nixpacks service:
+Single Nixpacks service (Node 20 + Python via `uv`):
 
 1. `uv sync` + `npm --prefix frontend ci`
 2. `npm --prefix frontend run build`
 3. `uv run cfin-api` on `$PORT` (binds `0.0.0.0`)
 
+GitHub Actions CI uses Node 22 for frontend steps; Railway build uses Node 20 from `nixpacks.toml` — both produce the same Vite bundle.
+
 Optional Railway Volume → `FINHUB_DATA_DIR=/data/finhub`.
 
 See [`DEPLOYMENT.md`](../DEPLOYMENT.md) for step-by-step setup.
+
+## Legacy / archived surfaces
+
+| Surface | Status |
+|---------|--------|
+| Streamlit app (`app/streamlit_app.py`, `archive/app/`) | **Archived** — replaced by React workbench; not part of deployment |
+| `/api/demo/*`, `/api/jobs/diagnose-new` | Legacy scripting endpoints; workbench uses `/api/workbench/*` |
+| `cfin-batch-demo` | Deterministic bootstrap CLI; not agentic |

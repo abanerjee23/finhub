@@ -30,6 +30,10 @@ bash scripts/dev-workbench.sh          # backend on :8000, frontend on :5173
 uv run cfin-seed --count 50 --reset      # clear + seed staging queue
 SUMMARY_USE_LLM=1 uv run cfin-sweep --batch-size 5
 
+# Legacy / maintenance CLI
+uv run cfin-batch-demo --count 50        # deterministic bootstrap (not agentic)
+uv run cfin-refresh-summaries            # regenerate ticket agent_summary fields
+
 # All deterministic tests + evals
 bash scripts/run_deterministic_evals.sh
 
@@ -38,8 +42,11 @@ bash scripts/run_summary_calibration.sh
 bash scripts/run_summary_evals.sh              # Promptfoo 10-doc judge + JSONL log
 bash scripts/run_summary_eval_batch.sh         # programmatic batch + log only
 
-# Pytest only
-uv run pytest tests/test_services.py tests/test_deterministic_cases.py tests/test_summary_cases.py tests/test_eval_results.py tests/test_ticketing.py tests/test_workbench_api.py -q
+# Pytest only (workbench + core)
+uv run pytest tests/test_services.py tests/test_deterministic_cases.py tests/test_summary_cases.py tests/test_eval_results.py tests/test_ticketing.py tests/test_workbench_api.py tests/test_observability.py -q
+
+# Pytest matching CI deterministic script only
+uv run pytest tests/test_deterministic_cases.py tests/test_services.py -q
 
 # Lint
 uv run ruff check src/ tests/ evals/ --line-length=100
@@ -84,7 +91,7 @@ Env: `FINHUB_DATA_DIR`, `STORAGE_BACKEND`, `S3_*`. Legacy ticket payloads migrat
 - **`operator_status`** — human queue status: `assigned`, `in_progress`, `blocked`, `resolved`
 - **`workflow_run.status`** — agent policy outcome (`needs_approval`, `blocked`, `reprocessed`, …); exposed as `workflow_status` in list API
 - **`timeline`** — internal journey + manual transitions (Activity Log in UI)
-- **`agent_summary`** — persisted LLM summary at ticket creation; `resolve_agent_summary()` returns stored LLM text only on read (no deterministic substitute)
+- **`agent_summary`** — persisted at ticket creation (`generate_analyst_summary()`); LLM when `SUMMARY_USE_LLM=1`, else eval-aligned deterministic template. `resolve_agent_summary()` polishes stored text on read and returns `None` for missing/legacy summaries (no on-read regeneration).
 
 ### Service Pipeline (services.py)
 
@@ -98,7 +105,18 @@ SyntheticRepository → Validator → DiagnosisService → RemediationPlanner �
 - `CLOSED_POSTING_PERIOD` → always `BLOCKED` (requires external controller action)
 - `MAINTAIN_SOURCE_MAPPING` → allowed; analyst manually maintains the mapping, then the document can be reprocessed
 
-**DeterministicWorkflow** orchestrates all services and records an `AuditLog` at each step. After the run, `generate_analyst_summary()` populates `agent_summary` when `SUMMARY_USE_LLM=1` and `OPENAI_API_KEY` is set.
+**DeterministicWorkflow** orchestrates all services and records an `AuditLog` at each step. After the run, `generate_analyst_summary()` populates `agent_summary` (LLM when `SUMMARY_USE_LLM=1` + key; deterministic template otherwise).
+
+### Observability (observability.py)
+
+Langfuse v4 + OpenInference when credentials are configured:
+
+- `configure_openai_agents_tracing()` — OpenAI Agents SDK spans → OTLP → Langfuse
+- `workflow_observation()` — root span per run; `langfuse_trace_id` on `WorkflowRun`
+- `summary_generation_observation()` — `analyst-summary` generation for `SUMMARY_MODEL`
+- `langfuse_trace_url()` — linked from ticket detail UI
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#observability-langfuse) for trace hierarchy diagram.
 
 ### Agent Tools (toolkit.py)
 
@@ -151,10 +169,6 @@ When eval work progresses, append a session entry to `Evals-Journey.md` and upda
 `WorkflowRun` is the top-level workflow output: contains `Diagnosis` (with `reason_code`), `RemediationPlan`, `GovernanceDecision`, `ReprocessResult`, `AuditEvents`, `agent_summary`, and optional Langfuse trace ID.
 
 `Ticket` (ticket_models.py) is the workbench entity: `operator_status`, `workflow_run`, `agent_summary`, `timeline`, `comments`, `attachments`.
-
-### Observability (observability.py)
-
-Langfuse + OpenInference instrumentation for OpenAI Agents SDK traces. Graceful no-op if credentials not set. Trace ID is recorded on `WorkflowRun`.
 
 ### Deployment
 

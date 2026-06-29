@@ -47,9 +47,9 @@
 | POC eval methodology | ✅ Done | Full loop validated |
 | Golden expansion (10 docs) | ✅ Done | `evals/summary_cases.yaml` — all 10 scenarios |
 | CI eval gate | ✅ Done | `.github/workflows/ci.yml` — deterministic on PR; summary on dispatch |
-| Eval result logging | ✅ Done | `evals/model_outputs.jsonl` + optional Excel export |
 | Eval result logging | ✅ Done | `evals/model_outputs.jsonl` + Promptfoo viewer |
-| Railway deployment docs | ✅ Done | `DEPLOYMENT.md` + `railway.json` + `nixpacks.toml` |
+| Langfuse observability | ✅ Done | Workflow traces + `analyst-summary` generation span |
+| Railway deployment | ✅ Done | `DEPLOYMENT.md` + `railway.json` + `nixpacks.toml`; code pushed to GitHub |
 | Architecture docs | ✅ Done | `docs/ARCHITECTURE.md` |
 | Workbench UI (self-contained demo) | ✅ Done | Reset/seed/sweep in UI; `operator_status` model |
 | Runtime persistence | ✅ Done | `FINHUB_DATA_DIR`, SQLite, local/S3 attachments |
@@ -275,21 +275,23 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 
 ## Session log
 
-### 2026-06-28 — Workbench, persistence, architecture docs
+### 2026-06-28 — Workbench, persistence, Langfuse, Railway, docs
 
-**Focus:** Product-ready demo surface and documentation alignment before Railway deploy.
+**Focus:** Product-ready demo surface, observability, and documentation alignment for Railway deploy.
 
 **Delivered:**
 
 - Self-contained workbench loop (reset/seed, agent sweep, refresh) — no terminal dependency for demos
 - Simplified ticket model: single `operator_status`; policy in `workflow_run` / agent diagnosis
 - Durable runtime state: `FINHUB_DATA_DIR`, SQLite tickets, local or S3 attachment storage
-- Agent diagnosis hero in ticket detail; analytics panel consolidated
+- Agent diagnosis hero in ticket detail; analytics panel consolidated; Langfuse trace link
+- Langfuse v4 integration: `workflow_observation` root span + `analyst-summary` generation for `SUMMARY_MODEL`
+- Production static frontend serving + `nixpacks.toml` build; same-origin API URLs fixed for Railway
 - Full architecture doc: `docs/ARCHITECTURE.md`
-- Updated `README.md`, `CLAUDE.md`, `DEPLOYMENT.md`, `finhub.md`
-- Production static frontend serving + `nixpacks.toml` build for Railway
+- Updated `README.md`, `CLAUDE.md`, `DEPLOYMENT.md`, `finhub.md`, `.env.example`
+- Code pushed to GitHub (`main`) for Railway deploy-from-repo
 
-**Next:** Railway deploy with volume mount at `FINHUB_DATA_DIR=/data/finhub`.
+**Next:** Railway service variables + volume mount at `FINHUB_DATA_DIR=/data/finhub`; portfolio screenshots.
 
 ---
 

@@ -88,9 +88,15 @@ These live in `scripts/`. They are **saved recipes** — a sequence of commands 
 
 **Runs in order:**
 
-1. **pytest** — `tests/test_deterministic_cases.py`, `tests/test_services.py`
+1. **pytest** — `tests/test_deterministic_cases.py`, `tests/test_services.py` (matches CI `deterministic` job)
 2. **Smoke check** — `scripts/smoke_check.py` (quick end-to-end sanity on a few documents)
 3. **Promptfoo** — 12 cases from `evals/deterministic_cases.yaml`
+
+For broader local coverage before a release, also run workbench tests:
+
+```bash
+uv run pytest tests/test_ticketing.py tests/test_workbench_api.py tests/test_observability.py -q
+```
 
 **API key:** Not needed (deterministic mode, no LLM agents).
 
@@ -138,7 +144,7 @@ bash scripts/run_summary_evals.sh
 |--------------|----------|
 | Policy, diagnosis, reprocess logic (`services.py`, `workflow.py`, etc.) | `bash scripts/run_deterministic_evals.sh` |
 | Synthetic data or deterministic golden cases (`evals/deterministic_cases.yaml`) | `bash scripts/run_deterministic_evals.sh` |
-| Workbench API, tickets, persistence (`api.py`, `ticketing.py`, `document_store.py`) | `uv run pytest tests/test_ticketing.py tests/test_workbench_api.py tests/test_ticket_migration.py -q` |
+| Workbench API, tickets, persistence (`api.py`, `ticketing.py`, `document_store.py`) | `uv run pytest tests/test_ticketing.py tests/test_workbench_api.py tests/test_ticket_migration.py tests/test_observability.py -q` |
 | Summary prompts, agent instructions, judge, golden YAML (`summary_cases.yaml`) | `bash scripts/run_summary_evals.sh` |
 | Models (`OPENAI_MODEL`, `SUMMARY_MODEL`, `SUMMARY_JUDGE_MODEL`) | `bash scripts/run_summary_evals.sh` |
 | Docs only (README, markdown) | Nothing required |

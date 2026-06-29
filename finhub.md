@@ -63,7 +63,7 @@ The workflow is structured as:
 - **Diagnosis agent** — classifies the root cause and captures evidence (via deterministic classifier).
 - **Remediation planner** — proposes the next action, approval requirement, and reprocessing path.
 - **Governance agent** — applies deterministic policy checks and invokes controlled reprocess only when allowed.
-- **Analyst summary writer** — produces a short plain-English explanation for finance analysts (`agent_summary`).
+- **Analyst summary writer** — produces a short plain-English explanation for finance analysts (`agent_summary`). Uses `SUMMARY_MODEL` when `SUMMARY_USE_LLM=1`; otherwise stores eval-aligned deterministic text.
 
 Agents do not directly mutate finance state. State-changing behavior lives in guarded tools backed by deterministic services.
 
@@ -88,7 +88,7 @@ The agent is an orchestrator inside a controlled execution boundary, not an unch
 | Agent orchestration | OpenAI Agents SDK (`gpt-4o-mini` default) |
 | Policy & services | Deterministic Python (`services.py`, `workflow.py`) |
 | Evals | Promptfoo — deterministic (12 cases) + summary LLM judge (10 golden docs) |
-| Observability | Langfuse + OpenTelemetry (optional) |
+| Observability | Langfuse + OpenTelemetry (optional) — agent spans + `analyst-summary` generation |
 | Demo UI | React exception workbench + FastAPI (`frontend/`, `src/cfin_agents/api.py`) |
 | Persistence | SQLite tickets/staging + local or S3 attachments (`FINHUB_DATA_DIR`) |
 | Deployment | Railway — [`DEPLOYMENT.md`](DEPLOYMENT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
@@ -103,6 +103,7 @@ The workbench is the portfolio-facing demo surface. Operators triage agent-creat
 2. Run agent processing — agents diagnose, apply policy, and create tickets with analyst summaries.
 3. Review the agent diagnosis callout on each ticket.
 4. Update operator status; add comments; upload proof when resolving.
+5. Open **View trace in Langfuse** on ticket detail to inspect agent + summary model spans (when Langfuse is configured).
 
 **Status model:**
 
