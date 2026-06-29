@@ -138,6 +138,7 @@ bash scripts/run_summary_evals.sh
 |--------------|----------|
 | Policy, diagnosis, reprocess logic (`services.py`, `workflow.py`, etc.) | `bash scripts/run_deterministic_evals.sh` |
 | Synthetic data or deterministic golden cases (`evals/deterministic_cases.yaml`) | `bash scripts/run_deterministic_evals.sh` |
+| Workbench API, tickets, persistence (`api.py`, `ticketing.py`, `document_store.py`) | `uv run pytest tests/test_ticketing.py tests/test_workbench_api.py tests/test_ticket_migration.py -q` |
 | Summary prompts, agent instructions, judge, golden YAML (`summary_cases.yaml`) | `bash scripts/run_summary_evals.sh` |
 | Models (`OPENAI_MODEL`, `SUMMARY_MODEL`, `SUMMARY_JUDGE_MODEL`) | `bash scripts/run_summary_evals.sh` |
 | Docs only (README, markdown) | Nothing required |
@@ -194,6 +195,7 @@ The **scripts** are the source of truth either way.
 | Doc | Topic |
 |-----|--------|
 | [`README.md`](README.md) | Project overview and eval commands |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture |
 | [`promptfoo.md`](promptfoo.md) | How manual grading became Promptfoo automation |
 | [`Evals-Journey.md`](Evals-Journey.md) | Session log + [eval concepts](Evals-Journey.md#evals-concepts-ground-up-guide) |
 

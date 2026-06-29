@@ -10,6 +10,8 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+export SUMMARY_USE_LLM=1
+
 echo "==> Running summary judge unit tests"
 uv run pytest tests/test_summary_cases.py tests/test_summary_judge.py -q
 

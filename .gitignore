@@ -12,3 +12,7 @@ evals/model_outputs.jsonl
 .DS_Store
 **/__pycache__/
 evals/__pycache__/
+frontend/node_modules/
+frontend/dist/
+data/synthetic/finhub.db
+data/synthetic/attachments/

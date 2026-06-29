@@ -89,8 +89,28 @@ The agent is an orchestrator inside a controlled execution boundary, not an unch
 | Policy & services | Deterministic Python (`services.py`, `workflow.py`) |
 | Evals | Promptfoo — deterministic (12 cases) + summary LLM judge (10 golden docs) |
 | Observability | Langfuse + OpenTelemetry (optional) |
-| Demo UI | Streamlit — workflow dashboard + Eval Results page |
-| Deployment | Railway ([`DEPLOYMENT.md`](DEPLOYMENT.md)) |
+| Demo UI | React exception workbench + FastAPI (`frontend/`, `src/cfin_agents/api.py`) |
+| Persistence | SQLite tickets/staging + local or S3 attachments (`FINHUB_DATA_DIR`) |
+| Deployment | Railway — [`DEPLOYMENT.md`](DEPLOYMENT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+
+## Exception Workbench (demo UI)
+
+The workbench is the portfolio-facing demo surface. Operators triage agent-created tickets without SAP connectivity.
+
+**Demo flow (UI only):**
+
+1. Reset & seed the staging queue with synthetic failed documents.
+2. Run agent processing — agents diagnose, apply policy, and create tickets with analyst summaries.
+3. Review the agent diagnosis callout on each ticket.
+4. Update operator status; add comments; upload proof when resolving.
+
+**Status model:**
+
+- **Operator status** (`assigned` / `in_progress` / `blocked` / `resolved`) — what humans control in the queue.
+- **Workflow status** (`needs_approval`, `blocked`, `reprocessed`, …) — agent policy outcome, shown as context in the diagnosis summary.
+- **Activity log** — ingestion, diagnosis, assignment, and manual transitions.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for API endpoints, persistence, and deployment topology.
 
 ## Synthetic Scenarios (10 documents)
 
@@ -133,6 +153,7 @@ The demo is realistic, portable, and suitable for portfolio sharing without expo
 | Doc | Use when… |
 |-----|-----------|
 | [`README.md`](README.md) | Running the app, evals, deployment |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Technical architecture, data model, API |
 | [`finhub.md`](finhub.md) | Explaining the business case (this file) |
 | [`Evals-Journey.md`](Evals-Journey.md) | Understanding the eval methodology and decisions |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | Deploying to Railway |

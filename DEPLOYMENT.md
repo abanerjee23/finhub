@@ -1,6 +1,8 @@
 # Railway Deployment
 
-Deploy the Streamlit dashboard to [Railway](https://railway.com). Eval scripts run locally or in GitHub Actions — not on Railway.
+Deploy the FinHub exception workbench (FastAPI + React) to [Railway](https://railway.com). Eval scripts run locally or in GitHub Actions — **not** on Railway.
+
+For architecture context see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Prerequisites
 
@@ -12,7 +14,10 @@ Deploy the Streamlit dashboard to [Railway](https://railway.com). Eval scripts r
 
 1. In Railway: **New Project** → **Deploy from GitHub repo**
 2. Select this repository
-3. Railway detects `railway.json` and uses Nixpacks to build
+3. Railway detects `railway.json` and `nixpacks.toml`:
+   - Installs Python (`uv sync`) and Node 20
+   - Runs `npm --prefix frontend run build`
+   - Starts `uv run cfin-api` on `$PORT`
 
 ## 2. Configure environment variables
 
@@ -23,37 +28,95 @@ In the Railway service **Variables** tab, set:
 | `OPENAI_API_KEY` | Yes | Multi-agent orchestration + analyst summaries |
 | `OPENAI_MODEL` | No | Default `gpt-4o-mini` |
 | `SUMMARY_MODEL` | No | Default `gpt-4o-mini` |
+| `SUMMARY_USE_LLM` | No | Set `1` to persist LLM-generated analyst summaries on tickets |
+| `SUMMARY_JUDGE_MODEL` | No | Default `gpt-4o` (evals only — not needed on Railway) |
 | `DISABLE_LLM` | No | Set `0` for multi-agent (default) |
 | `LANGFUSE_PUBLIC_KEY` | No | Observability traces |
 | `LANGFUSE_SECRET_KEY` | No | Observability traces |
-| `LANGFUSE_HOST` | No | e.g. `https://cloud.langfuse.com` |
+| `LANGFUSE_HOST` or `LANGFUSE_BASE_URL` | No | e.g. `https://cloud.langfuse.com` (either name works) |
+| `FINHUB_DATA_DIR` | **Recommended** | Directory for SQLite DB + local attachments |
+| `STORAGE_BACKEND` | No | `local` (default) or `s3` for attachment blobs |
+| `S3_BUCKET` | If `STORAGE_BACKEND=s3` | Object storage bucket |
+| `S3_ENDPOINT_URL` | No | S3-compatible endpoint (Railway Buckets, R2, MinIO) |
+| `S3_ACCESS_KEY_ID` | If using S3 | Access key |
+| `S3_SECRET_ACCESS_KEY` | If using S3 | Secret key |
+| `S3_REGION` | No | Default `auto` |
+| `S3_PREFIX` | No | Key prefix, default `attachments/` |
 
-Railway sets `PORT` automatically. The start command in `railway.json` binds Streamlit to `0.0.0.0:${PORT}`.
+Railway sets `PORT` automatically. The API binds `0.0.0.0:$PORT` when `PORT` is present.
 
-## 3. Health check
+## 3. Durable storage (recommended for demos)
 
-Railway uses `/_stcore/health` (configured in `railway.json`). The app should report healthy once Streamlit is listening.
+Railway containers use an **ephemeral filesystem** by default. Without persistence, tickets and proof uploads are lost on redeploy.
 
-## 4. Verify the deployment
+### Option A — Railway Volume (recommended)
 
-1. Open the generated Railway URL
-2. Select a failed document (e.g. `DOC-1002`)
-3. Click **Run guarded workflow**
-4. Confirm `execution_mode` shows `openai_agents_sdk_guarded` when `OPENAI_API_KEY` is set
-5. Open the **Eval Results** page in the sidebar to view logged summary eval runs (after running evals locally or in CI)
+1. In the service: **Settings → Volumes → Add Volume**
+2. Mount path: `/data`
+3. Set variable: `FINHUB_DATA_DIR=/data/finhub`
+4. Redeploy
 
-Summary eval golden labels: 10 docs in `evals/summary_cases.yaml`. Human Excel workbook (`AI Evals_SM5_v0.6.xlsx`) covers 3 starter docs + rubric — optional to sync the remaining 7 rows.
+SQLite (`finhub.db`) and attachment files live on the volume. Bundled synthetic documents/mappings stay in the Docker image.
 
-## 5. Local parity check
+### Option B — S3-compatible object storage (attachments only)
+
+Set `STORAGE_BACKEND=s3` and configure `S3_*` variables. Keep SQLite on a volume via `FINHUB_DATA_DIR`.
+
+## 4. Health check
+
+Railway uses `/api/health` (configured in `railway.json`). A healthy response includes:
+
+```json
+{
+  "status": "ok",
+  "storage_backend": "local",
+  "data_dir": "/data/finhub"
+}
+```
+
+## 5. Verify the deployment
+
+1. Open the generated Railway URL — the React workbench should load (built `frontend/dist` served by FastAPI).
+2. Confirm `/api/health` returns `ok` and `langfuse.connected: true`.
+3. In the UI **Workbench Controls** panel:
+   - Click **Reset & seed queue**
+   - Click **Run agent processing**
+   - Confirm tickets appear with agent diagnosis summaries
+4. Open a ticket, add a comment, upload proof on resolve to verify attachment storage.
+5. On ticket detail, click **View trace in Langfuse** to confirm agent spans appear for newly processed documents.
+
+## 6. Local dev
 
 ```bash
 uv sync
-cp .env.example .env   # add OPENAI_API_KEY
-uv run streamlit run app/streamlit_app.py
+cp .env.example .env   # add OPENAI_API_KEY, optionally SUMMARY_USE_LLM=1
+bash scripts/dev-workbench.sh   # backend :8000, frontend :5173 (Vite proxy)
+```
+
+Local dev uses two processes (API + Vite). Production uses a single process serving API + static build.
+
+## 7. Production build (manual check)
+
+To verify the production bundle locally:
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run build
+API_RELOAD=0 uv run cfin-api
+# open http://127.0.0.1:8000
 ```
 
 ## Notes
 
-- Synthetic data is bundled in `data/synthetic/` — no external database required
-- Do not put Promptfoo or eval API keys in Railway unless you intentionally run evals in CI only
+- Bundled read-only synthetic data ships in `data/synthetic/`; runtime tickets and attachments use `FINHUB_DATA_DIR`
+- Do not put Promptfoo or eval-only keys in Railway unless you intentionally run evals there
 - Rotate any API key that was ever committed to git before making the repo public
+- CLI seed/sweep (`cfin-seed`, `cfin-sweep`) remain available for automation; the UI workbench loop does not require them
+
+## Related docs
+
+| Doc | Topic |
+|-----|--------|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full system architecture |
+| [`README.md`](README.md) | Setup, evals, environment variables |
+| [`CI.md`](CI.md) | GitHub Actions vs local test scripts |

@@ -18,9 +18,9 @@ def call_api(prompt: str, options: dict | None = None, context: dict | None = No
     document_id = vars_.get("document_id") or prompt.strip()
     approve = str(vars_.get("approve", "false")).lower() == "true"
 
-    # Summary evals use the multi-agent orchestration path when OPENAI_API_KEY is set.
-    # Policy outcomes remain deterministic via guarded tool services.
+    # Summary evals exercise live LLM summaries when a key is present.
     os.environ["DISABLE_LLM"] = "0"
+    os.environ.setdefault("SUMMARY_USE_LLM", "1")
 
     run = run_document_workflow(
         document_id=document_id,

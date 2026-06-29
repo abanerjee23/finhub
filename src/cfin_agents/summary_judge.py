@@ -68,6 +68,11 @@ Conciseness — brief enough for queue triage:
 3 = somewhat verbose but usable
 1 = too verbose or too terse
 
+Always penalize summaries that:
+- Include internal reason codes (MD_*, MP_*, DC_*) or the phrase "reason code"
+- Restate approval/blocking/policy status in a closing sentence after already stating it
+- Use meta commentary ("the analyst should be aware", "sequence of actions required")
+
 GATE RULE
 overall_pass is true only when accuracy_score >= {GATE_MIN_SCORE}
 AND actionability_score >= {GATE_MIN_SCORE}.

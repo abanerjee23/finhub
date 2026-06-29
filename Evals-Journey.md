@@ -3,8 +3,8 @@
 > **Your personal reference for this project's eval work.**  
 > Session log, status, decisions, commands, and a ground-up eval concepts guide. Updated at the end of each eval session.
 
-**Last updated:** 2026-06-25  
-**Current phase:** Portfolio-ready — scale + ops complete  
+**Last updated:** 2026-06-28  
+**Current phase:** Portfolio-ready — workbench + persistence + docs aligned for Railway  
 **Starter docs:** DOC-1001 … DOC-1010 (full golden set)
 
 ---
@@ -48,8 +48,11 @@
 | Golden expansion (10 docs) | ✅ Done | `evals/summary_cases.yaml` — all 10 scenarios |
 | CI eval gate | ✅ Done | `.github/workflows/ci.yml` — deterministic on PR; summary on dispatch |
 | Eval result logging | ✅ Done | `evals/model_outputs.jsonl` + optional Excel export |
-| Streamlit eval view | ✅ Done | `app/pages/1_Eval_Results.py` |
-| Railway deployment docs | ✅ Done | `DEPLOYMENT.md` + `railway.json` |
+| Eval result logging | ✅ Done | `evals/model_outputs.jsonl` + Promptfoo viewer |
+| Railway deployment docs | ✅ Done | `DEPLOYMENT.md` + `railway.json` + `nixpacks.toml` |
+| Architecture docs | ✅ Done | `docs/ARCHITECTURE.md` |
+| Workbench UI (self-contained demo) | ✅ Done | Reset/seed/sweep in UI; `operator_status` model |
+| Runtime persistence | ✅ Done | `FINHUB_DATA_DIR`, SQLite, local/S3 attachments |
 
 ---
 
@@ -100,7 +103,7 @@ flowchart LR
 - [x] Expand golden dataset to all 10 synthetic docs
 - [x] Run summary evals in CI on prompt/model changes (manual workflow dispatch)
 - [x] Log judge scores + reasoning to `evals/model_outputs.jsonl` (+ optional Excel export)
-- [x] Streamlit pass/fail view
+- [x] Eval result logging (JSONL + Promptfoo viewer)
 - [x] Railway deployment guide
 - [ ] Add screenshots / demo GIF for portfolio
 - [ ] Re-calibrate judge only when rubric or `SUMMARY_JUDGE_MODEL` changes
@@ -117,7 +120,7 @@ See [Why Excel was left at 3 docs](#why-excel-was-left-at-3-docs) for the ration
 
 ### What Excel actually did
 
-Excel is **not** the automation runtime. Promptfoo, CI, and the Streamlit Eval Results page read from `evals/summary_cases.yaml`. Excel established the human benchmark:
+Excel is **not** the automation runtime. Promptfoo and CI read from `evals/summary_cases.yaml`. Excel established the human benchmark:
 
 | Excel role | What it established |
 |------------|---------------------|
@@ -271,6 +274,24 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 ---
 
 ## Session log
+
+### 2026-06-28 — Workbench, persistence, architecture docs
+
+**Focus:** Product-ready demo surface and documentation alignment before Railway deploy.
+
+**Delivered:**
+
+- Self-contained workbench loop (reset/seed, agent sweep, refresh) — no terminal dependency for demos
+- Simplified ticket model: single `operator_status`; policy in `workflow_run` / agent diagnosis
+- Durable runtime state: `FINHUB_DATA_DIR`, SQLite tickets, local or S3 attachment storage
+- Agent diagnosis hero in ticket detail; analytics panel consolidated
+- Full architecture doc: `docs/ARCHITECTURE.md`
+- Updated `README.md`, `CLAUDE.md`, `DEPLOYMENT.md`, `finhub.md`
+- Production static frontend serving + `nixpacks.toml` build for Railway
+
+**Next:** Railway deploy with volume mount at `FINHUB_DATA_DIR=/data/finhub`.
+
+---
 
 > Historical entries below reflect point-in-time state. For current status, see the [Status board](#status-board) above.
 
@@ -492,7 +513,7 @@ All live runs confirmed `execution_mode: openai_agents_sdk_guarded`.
 - Expanded `evals/summary_cases.yaml` from 3 → **10** golden docs
 - Added `src/cfin_agents/eval_results.py` + `scripts/log_summary_eval_results.py`
 - Results log to `evals/model_outputs.jsonl` with optional Excel export
-- Streamlit **Eval Results** page: `app/pages/1_Eval_Results.py`
+- Eval result log: `evals/model_outputs.jsonl`
 - GitHub Actions: `.github/workflows/ci.yml` (deterministic on PR, summary on dispatch)
 - Railway guide: `DEPLOYMENT.md`
 - README portfolio pitch + updated eval commands
@@ -503,7 +524,7 @@ All live runs confirmed `execution_mode: openai_agents_sdk_guarded`.
 bash scripts/run_deterministic_evals.sh      # CI parity
 bash scripts/run_summary_evals.sh            # Promptfoo + JSONL log
 bash scripts/run_summary_eval_batch.sh       # programmatic batch + log
-uv run streamlit run app/streamlit_app.py    # Workflow + Eval Results pages
+bash scripts/dev-workbench.sh                # backend :8000 + frontend :5173
 ```
 
 **Outcome:** ✅ Scale + ops layer complete. **10/10** summary evals green (`eval-dly-2026-06-25T16:35:05`); JSONL batch **10/10** (`eval-20260625T164027Z`). Project is portfolio-ready pending visuals and public repo hygiene.
@@ -1341,7 +1362,7 @@ Model-graded evals are the tool you reach for when deterministic checks run out.
 | `evals/summary_cases.yaml` | Machine-readable golden copy for Promptfoo (**10 docs**) |
 | `evals/model_outputs.jsonl` | Append-only log of summary eval judge results |
 | `src/cfin_agents/eval_results.py` | Batch runner, JSONL I/O, optional Excel export |
-| `app/pages/1_Eval_Results.py` | Streamlit pass/fail view |
+| `evals/model_outputs.jsonl` | Eval result log (JSONL) |
 | `.github/workflows/ci.yml` | CI workflow — see [`CI.md`](CI.md) |
 | `DEPLOYMENT.md` | Railway deployment guide |
 | `evals/summary_calibration_cases.yaml` | 6 calibration summaries |
@@ -1360,7 +1381,7 @@ Model-graded evals are the tool you reach for when deterministic checks run out.
 
 Portfolio polish only:
 
-1. **Add screenshots / demo GIF** — Streamlit workflow + Eval Results page
+1. **Add screenshots / demo GIF** — React workbench UI
 2. **Public repo hygiene** — rotate API keys, confirm `.env` is gitignored
 3. **Optional:** run summary eval batch twice and compare pass rates for judge variance
 
@@ -1370,7 +1391,7 @@ Portfolio polish only:
 
 | Date | Update |
 |------|--------|
-| 2026-06-25 | Session 8: 10-doc golden set, CI, eval logging, Streamlit eval page, Railway docs. |
+| 2026-06-25 | Session 8: 10-doc golden set, CI, eval logging, Railway docs. |
 | 2026-06-25 | Session 7: multi-agent + gpt-4o-mini full suite **51/51**; end-to-end eval loop doc. |
 | 2026-06-25 | Added clear multi-agent workflow reference, flowchart, models, and DOC-1002 end-to-end example. |
 | 2026-06-25 | Added Promptfoo run + browser viewer instructions to promptfoo.md and this file. |

@@ -6,12 +6,10 @@ For the business case and design narrative, see [`finhub.md`](finhub.md).
 
 ## What It Demonstrates
 
-- Synthetic Central Finance-style failed document queue.
-- Deterministic validation, remediation, approval, policy, audit, and reprocessing services.
-- Optional OpenAI Agents SDK orchestration over the deterministic tools.
-- Langfuse/OpenTelemetry observability when credentials are configured.
+- React + FastAPI **exception workbench** for triage — self-contained demo loop (seed, agent processing, refresh) with no terminal dependency.
+- Durable runtime state via SQLite + configurable attachment storage (`FINHUB_DATA_DIR`, optional S3).
 - Promptfoo evals for deterministic workflow guardrails and model-graded analyst summaries.
-- Streamlit dashboard with workflow + eval results pages, suitable for Railway deployment.
+- Langfuse/OpenTelemetry observability when credentials are configured.
 - GitHub Actions CI for deterministic evals; optional manual summary eval workflow.
 
 ## Local Setup
@@ -19,18 +17,41 @@ For the business case and design narrative, see [`finhub.md`](finhub.md).
 ```bash
 uv sync
 cp .env.example .env
-uv run streamlit run app/streamlit_app.py
+bash scripts/dev-workbench.sh   # backend on :8000, frontend on :5173
 ```
 
-The app works in deterministic mode without API keys. Set `OPENAI_API_KEY` to enable the OpenAI Agents SDK orchestration path (default when configured). Set Langfuse variables to export traces.
+The app works in deterministic mode without API keys. Set `OPENAI_API_KEY` to enable the OpenAI Agents SDK orchestration path (default when configured). Set `SUMMARY_USE_LLM=1` to persist LLM-generated analyst summaries on workbench tickets. Set Langfuse variables to export traces.
+
+## Exception Workbench
+
+The primary demo surface is the React workbench (`bash scripts/dev-workbench.sh`).
+
+```text
+Reset & seed queue  →  Run agent processing  →  Triage tickets in UI
+```
+
+| UI area | Purpose |
+|---------|---------|
+| **Workbench Controls** | Seed count, reset queue, sweep batch size, refresh |
+| **Analytics** | Total/active tickets, status breakdown, owner chart |
+| **Ticket detail** | Agent diagnosis hero, policy context, comments, proof uploads, activity log |
+| **Search Tickets** | Filter and update `operator_status` inline |
+
+Operator statuses: **Assigned**, **In Progress**, **Blocked** (requires comment), **Resolved** (requires proof attachment). Agent policy outcomes (`needs_approval`, `blocked`, etc.) live in `workflow_run` and the diagnosis summary — not as separate status pills.
+
+Architecture details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Environment Variables
 
 - `OPENAI_API_KEY`: enables OpenAI Agents SDK execution and analyst summary generation.
 - `OPENAI_MODEL`: model for agent orchestration, defaults to `gpt-4o-mini`.
 - `SUMMARY_MODEL`: model for `agent_summary` generation, defaults to `gpt-4o-mini`.
+- `SUMMARY_USE_LLM`: set to `1` to generate and persist LLM analyst summaries on tickets (recommended for demos).
 - `SUMMARY_JUDGE_MODEL`: model for Promptfoo LLM judge evals, defaults to `gpt-4o`.
 - `DISABLE_LLM`: set to `1` to force deterministic execution (no agent orchestration).
+- `FINHUB_DATA_DIR`: directory for SQLite DB and local attachments (default: `data/synthetic`; use a Railway volume path in production).
+- `STORAGE_BACKEND`: `local` (default) or `s3` for attachment blob storage.
+- `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_PREFIX`: S3-compatible storage when `STORAGE_BACKEND=s3`.
 - `LANGFUSE_PUBLIC_KEY`: Langfuse public key.
 - `LANGFUSE_SECRET_KEY`: Langfuse secret key.
 - `LANGFUSE_HOST`: Langfuse host, for example `https://cloud.langfuse.com`.
@@ -205,7 +226,7 @@ Optional Excel export (requires `uv sync --group dev`):
 uv run python scripts/log_summary_eval_results.py --excel "AI Evals_SM5_v0.6.xlsx"
 ```
 
-View results in Streamlit: open the **Eval Results** page in the sidebar after running a batch.
+View results in Promptfoo viewer (`npx promptfoo view`) or check `evals/model_outputs.jsonl` after running a batch.
 
 Or run Promptfoo configs directly:
 
@@ -224,6 +245,7 @@ See [`Evals-Journey.md`](Evals-Journey.md) for the session log, eval concepts gu
 | Doc | Purpose |
 |-----|---------|
 | [`README.md`](README.md) | Setup, workflow, evals, deployment (start here) |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, data model, API, persistence |
 | [`finhub.md`](finhub.md) | Business context, scope, and portfolio framing |
 | [`Evals-Journey.md`](Evals-Journey.md) | Eval methodology, session log, concepts guide |
 | [`promptfoo.md`](promptfoo.md) | Manual grading → Promptfoo automation |
@@ -240,19 +262,21 @@ Short version: GitHub Actions runs lint + deterministic evals on every push/PR; 
 
 > Agentic AI proof-of-concept for safe Central Finance failed-document remediation: multi-agent orchestration over deterministic policy guardrails, Promptfoo regression evals (12 deterministic + 10 summary golden docs), and an LLM-as-judge calibrated against human golden labels.
 
-Before sharing publicly: rotate any exposed API keys, keep `.env` out of git, add screenshots/GIFs of the Streamlit workflow and Eval Results pages.
+Before sharing publicly: rotate any exposed API keys, keep `.env` out of git, add screenshots/GIFs of the workbench UI.
 
 ## Railway Deployment
 
-See [`DEPLOYMENT.md`](DEPLOYMENT.md) for step-by-step Railway setup.
+See [`DEPLOYMENT.md`](DEPLOYMENT.md) for step-by-step Railway setup (volume mount, env vars, UI verification).
 
-Railway runs the Streamlit app as a single service using `railway.json`.
+Railway runs a single service via `nixpacks.toml` (builds React + starts FastAPI).
 
 Required Railway variables:
 
 - `OPENAI_API_KEY`
+- `FINHUB_DATA_DIR` (recommended — point at a mounted volume, e.g. `/data/finhub`)
+- `SUMMARY_USE_LLM=1` (recommended for LLM analyst summaries in demos)
 - `LANGFUSE_PUBLIC_KEY` (optional)
 - `LANGFUSE_SECRET_KEY` (optional)
 - `LANGFUSE_HOST` (optional)
 
-The prototype keeps synthetic data in the repository, so deployment does not require SAP connectivity or a database.
+Bundled synthetic documents ship in the image; runtime tickets and attachments need `FINHUB_DATA_DIR` persistence on Railway.

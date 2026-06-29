@@ -176,7 +176,7 @@ def test_policy_blocks_master_data_mutation_without_approval() -> None:
         assert decision.allowed is False
         assert decision.status == WorkflowStatus.NEEDS_APPROVAL
         assert decision.requires_approval is True
-        assert any("Target master-data creation" in r for r in decision.policy_reasons)
+        assert any("Target master data creation" in r for r in decision.policy_reasons)
 
 
 def test_policy_allows_master_data_mutation_with_approval() -> None:
