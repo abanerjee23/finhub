@@ -1,4 +1,4 @@
-# Railway/Nixpacks: Python (uv) + Node 20 for frontend build.
+# Railway/Nixpacks: Python (uv) + Node 22 for frontend build.
 # Do not call `uv sync` manually here — the python provider installs uv and syncs from uv.lock.
 
 providers = ["python"]
@@ -6,17 +6,15 @@ providers = ["python"]
 [variables]
 NIXPACKS_PYTHON_VERSION = "3.11"
 NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"
+# Railway sets NODE_ENV=production; ensure devDependencies (@types/*) install for the build.
+NPM_CONFIG_PRODUCTION = "false"
 
 [phases.setup]
 nixPkgs = ["nodejs_22"]
 
-[phases.install]
-cmds = [
-  "npm --prefix frontend ci --include=optional"
-]
-
 [phases.build]
 cmds = [
+  "npm --prefix frontend ci --include=optional --include=dev",
   "npm --prefix frontend run build"
 ]
 
