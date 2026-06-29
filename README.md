@@ -298,7 +298,7 @@ Before sharing publicly: rotate any exposed API keys, keep `.env` out of git, ad
 
 See [`DEPLOYMENT.md`](DEPLOYMENT.md) for step-by-step Railway setup (volume mount, env vars, UI verification).
 
-Railway runs a single service via `nixpacks.toml` (builds React + starts FastAPI).
+Railway runs a single **Docker** service via `Dockerfile` (Node 22 frontend build + Python/uv runtime).
 
 Required Railway variables:
 

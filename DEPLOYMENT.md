@@ -14,10 +14,12 @@ For architecture context see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 1. In Railway: **New Project** → **Deploy from GitHub repo**
 2. Select this repository
-3. Railway detects `railway.json` and `nixpacks.toml`:
-   - Installs Python (`uv` + `uv.lock`) and Node 22
-   - Runs `npm --prefix frontend ci` and `npm --prefix frontend run build`
+3. Railway uses the **`Dockerfile`** (see `railway.json`):
+   - Stage 1: Node 22 → `npm ci` + `vite build` in `frontend/`
+   - Stage 2: Python 3.11 + `uv sync` → copies built `frontend/dist`
    - Starts `uv run cfin-api` on `$PORT`
+
+> **Note:** `nixpacks.toml` is kept for reference only; production deploys use the Dockerfile for reproducible Linux builds.
 
 ## 2. Configure environment variables
 
@@ -120,7 +122,7 @@ API_RELOAD=0 uv run cfin-api
 
 - Bundled read-only synthetic data ships in `data/synthetic/`; runtime tickets and attachments use `FINHUB_DATA_DIR`
 - Production frontend uses same-origin `/api` (no separate Vite server); do not set `VITE_API_BASE` unless splitting API and UI
-- **Build troubleshooting:** if deploy logs show `Cannot find native binding` / Rolldown errors, the frontend uses **Vite 6** (not Vite 8) for Linux CI compatibility. If `tsc` fails with missing `@types/react`, ensure `NPM_CONFIG_PRODUCTION=false` in `nixpacks.toml` so devDependencies install during the build (Railway sets `NODE_ENV=production` by default). If `uv: command not found`, ensure `providers = ["python"]` and `NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"`.
+- **Build troubleshooting:** production builds use the **`Dockerfile`** (Node 22 + Python 3.11), not Nixpacks. If an old Nixpacks deploy shows Node 20 or Rolldown/`tsc` errors, trigger a fresh deploy after pulling latest `main`. In Railway → service → **Deployments** → **Clear build cache** if needed.
 - Do not put Promptfoo or eval-only keys in Railway unless you intentionally run evals there
 - Rotate any API key that was ever committed to git before making the repo public
 - CLI seed/sweep (`cfin-seed`, `cfin-sweep`) remain available for automation; the UI workbench loop does not require them

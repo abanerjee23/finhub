@@ -1,5 +1,4 @@
-# Railway/Nixpacks: Python (uv) + Node 22 for frontend build.
-# Do not call `uv sync` manually here — the python provider installs uv and syncs from uv.lock.
+# Legacy Nixpacks config (local reference). Railway production uses Dockerfile.
 
 providers = ["python"]
 
