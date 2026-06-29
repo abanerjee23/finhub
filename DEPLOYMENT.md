@@ -2,7 +2,7 @@
 
 Deploy the FinHub exception workbench (FastAPI + React) to [Railway](https://railway.com). Eval scripts run locally or in GitHub Actions — **not** on Railway.
 
-For architecture context see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+For architecture context see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). User-facing overview: [`README.md`](README.md#deploy-to-railway-production).
 
 ## Prerequisites
 
@@ -13,60 +13,99 @@ For architecture context see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ## 1. Create the service
 
 1. In Railway: **New Project** → **Deploy from GitHub repo**
-2. Select this repository
-3. Railway uses the **`Dockerfile`** (see `railway.json`):
-   - Stage 1: Node 22 → `npm ci` + `vite build` in `frontend/`
-   - Stage 2: Python 3.11 + `uv sync` → copies built `frontend/dist`
-   - Starts `uv run cfin-api` on `$PORT`
+2. Select this repository (branch: `main`)
+3. Railway reads `railway.json` and builds the **`Dockerfile`**:
 
-> **Note:** `nixpacks.toml` is kept for reference only; production deploys use the Dockerfile for reproducible Linux builds.
+   | Stage | Image | What it does |
+   |-------|-------|----------------|
+   | `frontend-builder` | `node:22-bookworm-slim` | `npm ci` + `vite build` → `frontend/dist` |
+   | `runtime` | `ghcr.io/astral-sh/uv:python3.11-bookworm-slim` | `uv sync --frozen --no-dev`, copy `dist`, start API |
 
-## 2. Configure environment variables
+4. The container runs `uv run cfin-api`, binding `0.0.0.0:$PORT` when Railway sets `PORT`.
 
-In the Railway service **Variables** tab, set:
+> **Note:** `nixpacks.toml` and `Procfile` are legacy/local references. Production deploys use the **Dockerfile** only (`railway.json` → `"builder": "DOCKERFILE"`).
+
+If a deploy still shows Nixpacks `stage-0` logs, open **Deployments** → **Clear build cache & redeploy** after pulling latest `main`.
+
+## 2. Public URL
+
+1. Open your service → **Settings** → **Networking** → **Public Networking**
+2. Click **Generate Domain**
+3. Your workbench loads at the root URL; API at `/api/*` on the same host (no separate frontend server)
+
+## 3. Environment variables
+
+In the service **Variables** tab:
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `OPENAI_API_KEY` | Yes | Multi-agent orchestration + analyst summaries |
-| `OPENAI_MODEL` | No | Default `gpt-4o-mini` |
-| `SUMMARY_MODEL` | No | Default `gpt-4o-mini` |
-| `SUMMARY_USE_LLM` | No | Set `1` to persist LLM-generated analyst summaries on tickets |
-| `SUMMARY_JUDGE_MODEL` | No | Default `gpt-4o` (evals only — not needed on Railway) |
+| `OPENAI_API_KEY` | **Yes** | Multi-agent orchestration + analyst summaries |
+| `SUMMARY_USE_LLM` | **Recommended** | Set `1` for LLM analyst summaries on tickets |
+| `SUMMARY_MODEL` | No | Default `gpt-4o-mini`; often `gpt-4o` for demos |
+| `OPENAI_MODEL` | No | Default `gpt-4o-mini` for agent orchestration |
 | `DISABLE_LLM` | No | Set `0` for multi-agent (default) |
+| `FINHUB_DATA_DIR` | **Recommended** | e.g. `/data/finhub` — SQLite + attachment files |
+| `RAILWAY_RUN_UID` | **Recommended** | Set `0` when using Docker + volumes (write permissions) |
 | `LANGFUSE_PUBLIC_KEY` | No | Observability traces |
 | `LANGFUSE_SECRET_KEY` | No | Observability traces |
-| `LANGFUSE_HOST` or `LANGFUSE_BASE_URL` | No | e.g. `https://cloud.langfuse.com` (either name works) |
-| `FINHUB_DATA_DIR` | **Recommended** | Directory for SQLite DB + local attachments |
+| `LANGFUSE_HOST` or `LANGFUSE_BASE_URL` | No | e.g. `https://cloud.langfuse.com` |
 | `STORAGE_BACKEND` | No | `local` (default) or `s3` for attachment blobs |
-| `S3_BUCKET` | If `STORAGE_BACKEND=s3` | Object storage bucket |
-| `S3_ENDPOINT_URL` | No | S3-compatible endpoint (Railway Buckets, R2, MinIO) |
-| `S3_ACCESS_KEY_ID` | If using S3 | Access key |
-| `S3_SECRET_ACCESS_KEY` | If using S3 | Secret key |
-| `S3_REGION` | No | Default `auto` |
-| `S3_PREFIX` | No | Key prefix, default `attachments/` |
+| `S3_*` | If `STORAGE_BACKEND=s3` | S3-compatible attachment storage |
 
-Railway sets `PORT` automatically. The API binds `0.0.0.0:$PORT` when `PORT` is present.
+Do **not** set `PORT` — Railway injects it automatically.
 
-## 3. Durable storage (recommended for demos)
+`SUMMARY_JUDGE_MODEL` and Promptfoo keys are for **local evals only** — not needed on Railway.
 
-Railway containers use an **ephemeral filesystem** by default. Without persistence, tickets and proof uploads are lost on redeploy.
+## 4. Durable storage (recommended)
 
-### Option A — Railway Volume (recommended)
+Railway containers use an **ephemeral filesystem** by default. Without a volume, tickets and proof uploads are lost on redeploy.
 
-1. In the service: **Settings → Volumes → Add Volume**
-2. Mount path: `/data`
-3. Set variable: `FINHUB_DATA_DIR=/data/finhub`
-4. Redeploy
+### Create a Railway Volume
 
-SQLite (`finhub.db`) and attachment files live on the volume. Bundled synthetic documents/mappings stay in the Docker image.
+Volumes are **not** under Settings → Volumes in the current Railway UI. Use one of:
 
-### Option B — S3-compatible object storage (attachments only)
+**Command palette (recommended)**
+
+1. Open your **project canvas** (diagram view with the service box)
+2. Press **`⌘K`** (Mac) or **`Ctrl+K`** (Windows/Linux)
+3. Search **Create Volume** (or **Add Volume**)
+4. Select your FinHub service
+5. Set **mount path:** `/data`
+6. Confirm — Railway redeploys the service
+
+**Right-click**
+
+- Right-click the project canvas → **Create Volume** → same steps as above
+
+**CLI**
+
+```bash
+npx @railway/cli login
+npx @railway/cli link
+npx @railway/cli volume add --mount-path /data
+```
+
+### Configure the app
+
+After attaching the volume:
+
+1. Set variable: `FINHUB_DATA_DIR=/data/finhub`
+2. Set variable: `RAILWAY_RUN_UID=0` (Docker runtime + volume writes)
+3. Redeploy if not automatic
+
+The app creates `/data/finhub/finhub.db` and attachment subdirs on first use. Bundled synthetic JSON (`documents.json`, mappings, etc.) stays in the Docker image under `/app/data/synthetic/`.
+
+Railway also sets `RAILWAY_VOLUME_MOUNT_PATH` at runtime when a volume is attached — you do not need to define it manually.
+
+### Option B — S3-compatible storage (attachments only)
 
 Set `STORAGE_BACKEND=s3` and configure `S3_*` variables. Keep SQLite on a volume via `FINHUB_DATA_DIR`.
 
-## 4. Health check
+## 5. Health check
 
-Railway uses `/api/health` (configured in `railway.json`). A healthy response includes:
+Configured in `railway.json`: `GET /api/health` (120s timeout).
+
+Healthy response example:
 
 ```json
 {
@@ -81,23 +120,24 @@ Railway uses `/api/health` (configured in `railway.json`). A healthy response in
 }
 ```
 
-If Langfuse variables are not set, `langfuse.enabled` is `false` — that is expected and does not block deployment.
+If Langfuse variables are not set, `"langfuse": {"enabled": false}` is expected and does not block deployment.
 
-## 5. Verify the deployment
+## 6. Verify the deployment
 
-1. Open the generated Railway URL — the React workbench should load (built `frontend/dist` served by FastAPI).
-2. Confirm `/api/health` returns `"status": "ok"`. If Langfuse is configured, confirm `"langfuse": {"connected": true}`.
-3. In the UI **Workbench Controls** panel:
-   - Click **Reset & seed queue**
-   - Click **Run agent processing**
+1. Open your Railway domain — the React workbench should load (static files from `frontend/dist` served by FastAPI).
+2. Confirm `https://<your-domain>/api/health` returns `"status": "ok"` and `"data_dir": "/data/finhub"` when the volume is configured.
+3. In **Workbench Controls**:
+   - **Reset & seed queue**
+   - **Run agent processing**
    - Confirm tickets appear with agent diagnosis summaries
-4. Open a ticket, add a comment, upload proof on resolve to verify attachment storage.
-5. On ticket detail, click **View trace in Langfuse** (when Langfuse is configured) and confirm:
+4. Open a ticket — add a comment, upload proof on **Resolved** (verifies volume + attachments).
+5. Click **View trace in Langfuse** (when Langfuse is configured) on a newly processed ticket:
    - Root span `agentic-cfin-workflow`
    - Agent SDK spans (`OPENAI_MODEL`)
    - Generation `analyst-summary` (`SUMMARY_MODEL`) when `SUMMARY_USE_LLM=1`
+6. **Persistence check:** redeploy once — tickets should still exist if the volume is mounted correctly.
 
-## 6. Local dev
+## 7. Local development
 
 ```bash
 uv sync
@@ -105,11 +145,11 @@ cp .env.example .env   # add OPENAI_API_KEY, optionally SUMMARY_USE_LLM=1
 bash scripts/dev-workbench.sh   # backend :8000, frontend :5173 (Vite proxy)
 ```
 
-Local dev uses two processes (API + Vite). Production uses a single process serving API + static build.
+Local dev uses two processes (API + Vite). Production uses one Docker container.
 
-## 7. Production build (manual check)
+## 8. Production build (manual check)
 
-To verify the production bundle locally:
+**Without Docker** (API + pre-built frontend):
 
 ```bash
 npm --prefix frontend ci
@@ -118,20 +158,41 @@ API_RELOAD=0 uv run cfin-api
 # open http://127.0.0.1:8000
 ```
 
+**With Docker** (matches Railway):
+
+```bash
+docker build -t finhub .
+docker run --rm -p 8000:8000 \
+  -e OPENAI_API_KEY=sk-... \
+  -e SUMMARY_USE_LLM=1 \
+  finhub
+```
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| Build shows Nixpacks `stage-0` / Node 20 | Clear build cache; ensure latest `main` with `Dockerfile` + `railway.json` |
+| `uv: command not found` | Old Nixpacks deploy — switch to Dockerfile builder |
+| Rolldown / native binding errors | Fixed by Dockerfile + Vite 6 pin; clear cache and redeploy |
+| UI loads, API 404 | Check deploy logs; confirm `/api/health` |
+| Sweep creates no tickets | Set `OPENAI_API_KEY`; check deploy **Logs** for errors |
+| DB/upload permission denied | Set `RAILWAY_RUN_UID=0` and `FINHUB_DATA_DIR=/data/finhub` |
+| Data lost after redeploy | Attach volume at `/data`; set `FINHUB_DATA_DIR` |
+| No Langfuse trace link | Set Langfuse vars; re-sweep (old tickets have no trace ID) |
+
 ## Notes
 
-- Bundled read-only synthetic data ships in `data/synthetic/`; runtime tickets and attachments use `FINHUB_DATA_DIR`
-- Production frontend uses same-origin `/api` (no separate Vite server); do not set `VITE_API_BASE` unless splitting API and UI
-- **Build troubleshooting:** production builds use the **`Dockerfile`** (Node 22 + Python 3.11), not Nixpacks. If an old Nixpacks deploy shows Node 20 or Rolldown/`tsc` errors, trigger a fresh deploy after pulling latest `main`. In Railway → service → **Deployments** → **Clear build cache** if needed.
-- Do not put Promptfoo or eval-only keys in Railway unless you intentionally run evals there
+- Bundled read-only synthetic data ships in the Docker image; runtime tickets and attachments use `FINHUB_DATA_DIR`
+- Production frontend uses same-origin `/api` — do not set `VITE_API_BASE` unless splitting API and UI hosts
+- CLI seed/sweep (`cfin-seed`, `cfin-sweep`) remain for automation; the UI workbench loop does not require them
+- Legacy API endpoints (`/api/demo/*`, `/api/jobs/diagnose-new`) exist for scripting; the workbench uses `/api/workbench/*`
 - Rotate any API key that was ever committed to git before making the repo public
-- CLI seed/sweep (`cfin-seed`, `cfin-sweep`) remain available for automation; the UI workbench loop does not require them
-- **Legacy API** endpoints (`/api/demo/*`, `/api/jobs/diagnose-new`) exist for scripting; the workbench uses `/api/workbench/*`
 
 ## Related docs
 
 | Doc | Topic |
 |-----|--------|
+| [`README.md`](README.md) | Setup, evals, Railway quick start |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full system architecture |
-| [`README.md`](README.md) | Setup, evals, environment variables |
 | [`CI.md`](CI.md) | GitHub Actions vs local test scripts |

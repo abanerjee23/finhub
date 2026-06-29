@@ -91,7 +91,7 @@ The agent is an orchestrator inside a controlled execution boundary, not an unch
 | Observability | Langfuse + OpenTelemetry (optional) — agent spans + `analyst-summary` generation |
 | Demo UI | React exception workbench + FastAPI (`frontend/`, `src/cfin_agents/api.py`) |
 | Persistence | SQLite tickets/staging + local or S3 attachments (`FINHUB_DATA_DIR`) |
-| Deployment | Railway — [`DEPLOYMENT.md`](DEPLOYMENT.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Deployment | Railway — multi-stage **`Dockerfile`** ([`DEPLOYMENT.md`](DEPLOYMENT.md)) |
 
 ## Exception Workbench (demo UI)
 

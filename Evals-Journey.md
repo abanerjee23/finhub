@@ -4,7 +4,7 @@
 > Session log, status, decisions, commands, and a ground-up eval concepts guide. Updated at the end of each eval session.
 
 **Last updated:** 2026-06-28  
-**Current phase:** Portfolio-ready — workbench + persistence + docs aligned for Railway  
+**Current phase:** Live on Railway — workbench deployed with Docker, volume, Langfuse  
 **Starter docs:** DOC-1001 … DOC-1010 (full golden set)
 
 ---
@@ -49,7 +49,7 @@
 | CI eval gate | ✅ Done | `.github/workflows/ci.yml` — deterministic on PR; summary on dispatch |
 | Eval result logging | ✅ Done | `evals/model_outputs.jsonl` + Promptfoo viewer |
 | Langfuse observability | ✅ Done | Workflow traces + `analyst-summary` generation span |
-| Railway deployment | ✅ Done | `DEPLOYMENT.md` + `railway.json` + `nixpacks.toml`; code pushed to GitHub |
+| Railway deployment | ✅ Live | `Dockerfile` + `railway.json`; volume at `/data`, `FINHUB_DATA_DIR=/data/finhub` |
 | Architecture docs | ✅ Done | `docs/ARCHITECTURE.md` |
 | Workbench UI (self-contained demo) | ✅ Done | Reset/seed/sweep in UI; `operator_status` model |
 | Runtime persistence | ✅ Done | `FINHUB_DATA_DIR`, SQLite, local/S3 attachments |
@@ -275,6 +275,22 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 
 ## Session log
 
+### 2026-06-28 — Railway live deploy
+
+**Focus:** Production deployment on Railway with Docker, volume persistence, and doc alignment.
+
+**Delivered:**
+
+- Switched Railway build from Nixpacks to multi-stage **`Dockerfile`** (Node 22 + Python 3.11/uv)
+- Pinned frontend to **Vite 6** for reliable Linux builds
+- Live service verified: workbench UI, agent sweep, ticket triage, attachments, Langfuse traces
+- Railway Volume at `/data` with `FINHUB_DATA_DIR=/data/finhub`, `RAILWAY_RUN_UID=0`
+- Updated `README.md`, `DEPLOYMENT.md`, `ARCHITECTURE.md` with current Railway UI (⌘K volume creation)
+
+**Next:** Portfolio screenshots; optional custom domain.
+
+---
+
 ### 2026-06-28 — Workbench, persistence, Langfuse, Railway, docs
 
 **Focus:** Product-ready demo surface, observability, and documentation alignment for Railway deploy.
@@ -286,7 +302,7 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 - Durable runtime state: `FINHUB_DATA_DIR`, SQLite tickets, local or S3 attachment storage
 - Agent diagnosis hero in ticket detail; analytics panel consolidated; Langfuse trace link
 - Langfuse v4 integration: `workflow_observation` root span + `analyst-summary` generation for `SUMMARY_MODEL`
-- Production static frontend serving + `nixpacks.toml` build; same-origin API URLs fixed for Railway
+- Production static frontend serving + **Dockerfile** deploy; same-origin API URLs for Railway
 - Full architecture doc: `docs/ARCHITECTURE.md`
 - Updated `README.md`, `CLAUDE.md`, `DEPLOYMENT.md`, `finhub.md`, `.env.example`
 - Code pushed to GitHub (`main`) for Railway deploy-from-repo

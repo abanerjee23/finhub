@@ -172,4 +172,4 @@ When eval work progresses, append a session entry to `Evals-Journey.md` and upda
 
 ### Deployment
 
-FastAPI (`src/cfin_agents/api.py`) serves REST API and production React build (`frontend/dist`). Dev: `bash scripts/dev-workbench.sh` (Vite + API). Railway: `nixpacks.toml` builds frontend; `railway.json` + `Procfile` start `cfin-api`. See `DEPLOYMENT.md`. Mount Railway Volume → `FINHUB_DATA_DIR` for durable tickets/attachments. Health check: `/api/health`. Evals run locally or in GitHub Actions — not on Railway.
+FastAPI (`src/cfin_agents/api.py`) serves REST API and production React build (`frontend/dist`). Dev: `bash scripts/dev-workbench.sh` (Vite + API). **Railway:** multi-stage `Dockerfile` (Node 22 frontend build → Python 3.11/uv runtime); config in `railway.json`. See [`DEPLOYMENT.md`](DEPLOYMENT.md). Attach Railway Volume at `/data` → `FINHUB_DATA_DIR=/data/finhub`; set `RAILWAY_RUN_UID=0` for Docker. Health: `/api/health`. Evals run locally or in GitHub Actions — not on Railway.

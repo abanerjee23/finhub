@@ -22,7 +22,68 @@ bash scripts/dev-workbench.sh   # backend on :8000, frontend on :5173
 
 The app works in deterministic mode without API keys. Set `OPENAI_API_KEY` to enable the OpenAI Agents SDK orchestration path (default when configured). Set `SUMMARY_USE_LLM=1` to persist LLM-generated analyst summaries on workbench tickets. Set Langfuse variables to export traces.
 
-## Exception Workbench
+## Deploy to Railway (production)
+
+FinHub ships as a **multi-stage Docker** image (`Dockerfile` + `railway.json`). One container serves the React workbench and FastAPI API on Railway's `$PORT`. Eval scripts run **locally or in GitHub Actions only** — not on Railway.
+
+Full walkthrough: [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+### Quick deploy checklist
+
+1. **Railway** → **New Project** → **Deploy from GitHub repo** → select this repo (`main`).
+2. Wait for the **Docker build** to succeed (Node 22 frontend build → Python 3.11/uv runtime).
+3. **Variables** tab — set at minimum:
+
+   | Variable | Value |
+   |----------|--------|
+   | `OPENAI_API_KEY` | your OpenAI key |
+   | `SUMMARY_USE_LLM` | `1` |
+   | `SUMMARY_MODEL` | e.g. `gpt-4o` |
+   | `FINHUB_DATA_DIR` | `/data/finhub` *(after volume step)* |
+   | `RAILWAY_RUN_UID` | `0` *(recommended with Docker + volumes)* |
+
+   Optional: `OPENAI_MODEL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`.
+
+4. **Persistent storage** — on the project canvas, press **`⌘K`** (or **`Ctrl+K`**) → **Create Volume** → attach to your service → mount path **`/data`**. Then set `FINHUB_DATA_DIR=/data/finhub` and redeploy.  
+   *(Railway volumes are created from the command palette or right-click menu — not under Settings → Volumes.)*
+
+5. **Settings → Networking → Generate Domain** — open the public URL.
+
+6. **Verify** — visit `https://<your-domain>/api/health` (expect `"status": "ok"`) then run the workbench demo loop below.
+
+### Production demo loop
+
+Same as local, no terminal required:
+
+```text
+Reset & seed queue  →  Run agent processing  →  Triage tickets  →  View trace in Langfuse
+```
+
+### Local vs production
+
+| | Local dev | Railway (production) |
+|---|-----------|----------------------|
+| Start | `bash scripts/dev-workbench.sh` | Auto-starts via Docker `CMD` |
+| UI | `http://localhost:5173` (Vite) | Your Railway domain (root URL) |
+| API | `:8000` (proxied by Vite) | Same origin `/api` on one port |
+| Data | `data/synthetic/` by default | `FINHUB_DATA_DIR` on mounted volume |
+| Build | Two processes | Single Docker image (`frontend/dist` baked in) |
+
+### Docker build (how Railway builds this repo)
+
+```text
+Stage 1 (node:22)     npm ci + vite build  →  frontend/dist
+Stage 2 (python:3.11) uv sync --frozen     →  copy dist, run cfin-api
+```
+
+To reproduce the production image locally (requires Docker):
+
+```bash
+docker build -t finhub .
+docker run --rm -p 8000:8000 -e OPENAI_API_KEY=sk-... -e SUMMARY_USE_LLM=1 finhub
+# open http://127.0.0.1:8000
+```
+
 
 The primary demo surface is the React workbench (`bash scripts/dev-workbench.sh`).
 
@@ -62,7 +123,8 @@ The **workbench UI** (`Reset & seed` / `Run agent processing`) is the recommende
 - `SUMMARY_USE_LLM`: set to `1` to generate and persist LLM analyst summaries on tickets (recommended for demos).
 - `SUMMARY_JUDGE_MODEL`: model for Promptfoo LLM judge evals, defaults to `gpt-4o` (evals only).
 - `DISABLE_LLM`: set to `1` to force deterministic execution (no agent orchestration).
-- `FINHUB_DATA_DIR`: directory for SQLite DB and local attachments (default: `data/synthetic`; use a Railway volume path in production).
+- `FINHUB_DATA_DIR`: directory for SQLite DB and local attachments (default: `data/synthetic`; on Railway use `/data/finhub` with a mounted volume).
+- `RAILWAY_RUN_UID`: set to `0` on Railway when using Docker + volumes (Railway-only; not in local `.env`).
 - `STORAGE_BACKEND`: `local` (default) or `s3` for attachment blob storage.
 - `S3_BUCKET`, `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_PREFIX`: S3-compatible storage when `STORAGE_BACKEND=s3`.
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`: Langfuse observability (optional).
@@ -292,21 +354,4 @@ Short version: GitHub Actions runs lint + deterministic evals on every push/PR; 
 
 > Agentic AI proof-of-concept for safe Central Finance failed-document remediation: multi-agent orchestration over deterministic policy guardrails, Promptfoo regression evals (12 deterministic + 10 summary golden docs), and an LLM-as-judge calibrated against human golden labels.
 
-Before sharing publicly: rotate any exposed API keys, keep `.env` out of git, add screenshots/GIFs of the workbench UI.
-
-## Railway Deployment
-
-See [`DEPLOYMENT.md`](DEPLOYMENT.md) for step-by-step Railway setup (volume mount, env vars, UI verification).
-
-Railway runs a single **Docker** service via `Dockerfile` (Node 22 frontend build + Python/uv runtime).
-
-Required Railway variables:
-
-- `OPENAI_API_KEY`
-- `FINHUB_DATA_DIR` (recommended — point at a mounted volume, e.g. `/data/finhub`)
-- `SUMMARY_USE_LLM=1` (recommended for LLM analyst summaries in demos)
-- `SUMMARY_MODEL` (optional — e.g. `gpt-4o` for summary generation)
-- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` (optional observability)
-- `STORAGE_BACKEND` + `S3_*` (optional — S3-compatible attachment storage)
-
-Bundled synthetic documents ship in the image; runtime tickets and attachments need `FINHUB_DATA_DIR` persistence on Railway. Eval scripts are **not** run on Railway.
+Before sharing publicly: rotate any exposed API keys, keep `.env` out of git, add screenshots/GIFs of the workbench UI, and link to your live Railway demo URL in the repo description if desired.

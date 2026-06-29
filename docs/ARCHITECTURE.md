@@ -242,15 +242,19 @@ Evals run locally or in GitHub Actions — **not** on the Railway service. See [
 
 ## Deployment topology (Railway)
 
-Multi-stage **Dockerfile**:
+Multi-stage **`Dockerfile`** (configured via `railway.json` → `"builder": "DOCKERFILE"`):
 
-1. **frontend-builder** — Node 22 → `npm ci` + `vite build`
-2. **runtime** — `ghcr.io/astral-sh/uv:python3.11` → `uv sync --frozen --no-dev` + copy `frontend/dist`
-3. `CMD uv run cfin-api` on `$PORT`
+1. **frontend-builder** — `node:22-bookworm-slim` → `npm ci` + `vite build`
+2. **runtime** — `ghcr.io/astral-sh/uv:python3.11-bookworm-slim` → `uv sync --frozen --no-dev` + copy `frontend/dist`
+3. `CMD uv run cfin-api` — binds `0.0.0.0:$PORT` when Railway sets `PORT`
 
-Optional Railway Volume → `FINHUB_DATA_DIR=/data/finhub`.
+**Persistence:** create a Railway Volume (project canvas → **`⌘K`** → Create Volume) mounted at `/data`, then set `FINHUB_DATA_DIR=/data/finhub` and `RAILWAY_RUN_UID=0`.
 
-See [`DEPLOYMENT.md`](../DEPLOYMENT.md) for step-by-step setup.
+**Health check:** `GET /api/health` (120s timeout in `railway.json`).
+
+Frontend pins **Vite 6** for reliable Linux Docker builds. Local dev uses Vite 6 on `:5173` with API proxy; production serves `frontend/dist` from FastAPI on one port.
+
+See [`DEPLOYMENT.md`](../DEPLOYMENT.md) for step-by-step setup and troubleshooting.
 
 ## Legacy / archived surfaces
 
