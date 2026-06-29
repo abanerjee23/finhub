@@ -16,16 +16,12 @@ echo "==> Running summary judge unit tests"
 uv run pytest tests/test_summary_cases.py tests/test_summary_judge.py -q
 
 echo "==> Calibrating LLM judge against human pass/fail labels"
-PROMPTFOO_CONFIG_DIR=.promptfoo \
-PROMPTFOO_DISABLE_WAL_MODE=true \
-PROMPTFOO_PYTHON=.venv/bin/python \
-npx promptfoo eval -c evals/promptfoo_summary_calibration_config.yaml --no-progress-bar
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/promptfoo_common.sh"
+npx promptfoo eval -c evals/promptfoo_summary_calibration_config.yaml --no-progress-bar "${PROMPTFOO_SHARE_FLAG[@]}"
 
 echo "==> Running live summary evals with LLM judge"
-PROMPTFOO_CONFIG_DIR=.promptfoo \
-PROMPTFOO_DISABLE_WAL_MODE=true \
-PROMPTFOO_PYTHON=.venv/bin/python \
-npx promptfoo eval -c evals/promptfoo_summary_config.yaml --no-progress-bar
+npx promptfoo eval -c evals/promptfoo_summary_config.yaml --no-progress-bar "${PROMPTFOO_SHARE_FLAG[@]}"
 
 echo "Summary eval suite completed successfully."
 

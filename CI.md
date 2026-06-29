@@ -173,13 +173,13 @@ If deterministic evals fail, something in the workflow no longer matches the gol
 | Benefit | Solo project |
 |---------|----------------|
 | Reminds you to run tests | Mildly useful |
-| Green checkmark on GitHub | Portfolio signal |
+| Green checkmark on GitHub | Visible proof the main test path passed |
 | Blocks bad merges | Not relevant (no collaborators) |
 | Runs summary evals on every push | No — still manual by design |
 
 CI was added as **scale + ops polish**: it shows evals can gate changes the way production teams do. You can:
 
-- **Keep it** if you publish the repo and want the story
+- **Keep it** if you want automated regression checks on every push
 - **Ignore it** until you push to GitHub
 - **Remove or simplify** `.github/workflows/ci.yml` if you prefer less maintenance (e.g. lint + pytest only, skip Promptfoo in CI)
 

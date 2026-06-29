@@ -496,7 +496,7 @@ RULES:
 
 Return only the summary text."""
 
-        summary_model = os.getenv("SUMMARY_MODEL", "gpt-4o-mini")
+        summary_model = os.getenv("SUMMARY_MODEL", "gpt-4o")
         request_kwargs: dict[str, object] = {
             "model": summary_model,
             "messages": [{"role": "user", "content": prompt}],

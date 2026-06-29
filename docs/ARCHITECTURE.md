@@ -1,11 +1,11 @@
 # FinHub Architecture
 
-> Technical architecture for the Agentic CFIN workflow prototype and exception workbench.  
+> Technical architecture for FinHub - Agentic Document Resolution Workbench.
 > For setup commands see [`README.md`](../README.md). For Railway see [`DEPLOYMENT.md`](../DEPLOYMENT.md).
 
 ## System overview
 
-FinHub simulates Central Finance failed-document replication remediation using **synthetic data** and **deterministic policy services**. OpenAI Agents SDK orchestration is optional; agents call tools but cannot bypass guardrails.
+FinHub simulates Central Finance failed-document replication remediation using **synthetic data** and **deterministic policy services**. OpenAI Agents SDK orchestration is optional; all operational agents use `gpt-4o-mini` by default, the analyst summary writer uses `gpt-4o`, and agents cannot bypass guardrails.
 
 ```mermaid
 flowchart TB
@@ -85,7 +85,7 @@ Orchestrated by `DeterministicWorkflow` in `services.py` / `workflow.py`. Record
 
 After the workflow completes, `generate_analyst_summary()` writes `agent_summary`:
 
-- **`SUMMARY_USE_LLM=1` + `OPENAI_API_KEY`:** LLM text via `SUMMARY_MODEL` (exported to Langfuse as `analyst-summary` generation).
+- **`SUMMARY_USE_LLM=1` + `OPENAI_API_KEY`:** LLM text via `SUMMARY_MODEL=gpt-4o` (exported to Langfuse as `analyst-summary` generation).
 - **Otherwise:** eval-aligned deterministic template from `analyst_summary.py`.
 
 `resolve_agent_summary()` polishes stored text on read and returns `None` for missing or legacy verbose summaries — it does **not** regenerate summaries on read.
@@ -204,8 +204,8 @@ Trace hierarchy when Langfuse is enabled:
 
 ```text
 agentic-cfin-workflow (root span)
-├── OpenAI Agents SDK spans (OPENAI_MODEL)
-└── analyst-summary (generation, SUMMARY_MODEL)
+├── OpenAI Agents SDK spans (OPENAI_MODEL=gpt-4o-mini)
+└── analyst-summary (generation, SUMMARY_MODEL=gpt-4o)
 ```
 
 ## Agent tools
@@ -251,6 +251,8 @@ Multi-stage **`Dockerfile`** (configured via `railway.json` → `"builder": "DOC
 **Persistence:** create a Railway Volume (project canvas → **`⌘K`** → Create Volume) mounted at `/data`, then set `FINHUB_DATA_DIR=/data/finhub` and `RAILWAY_RUN_UID=0`.
 
 **Health check:** `GET /api/health` (120s timeout in `railway.json`).
+
+**Langfuse trace example:** [`docs/LANGFUSE-TRACE-EXAMPLE.md`](LANGFUSE-TRACE-EXAMPLE.md) — annotated walkthrough of trace `b268da541f455e73279bf2bda22fb7c6`.
 
 Frontend pins **Vite 6** for reliable Linux Docker builds. Local dev uses Vite 6 on `:5173` with API proxy; production serves `frontend/dist` from FastAPI on one port.
 

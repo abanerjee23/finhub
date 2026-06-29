@@ -1,4 +1,4 @@
-"""Agentic CFIN workflow prototype package."""
+"""FinHub - Agentic Document Resolution Workbench package."""
 
 from cfin_agents.workflow import AgenticWorkflow, run_document_workflow
 

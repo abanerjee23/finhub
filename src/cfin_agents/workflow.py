@@ -179,7 +179,7 @@ class AgenticWorkflow:
         await Runner.run(manager, prompt)
 
         # The deterministic controller is the authoritative final state, even when agents run.
-        # agent_summary comes from generate_analyst_summary() (SUMMARY_MODEL, default gpt-4o-mini).
+        # agent_summary comes from generate_analyst_summary() (SUMMARY_MODEL, default gpt-4o).
         return self.deterministic.run(
             document_id=document_id,
             approve=False,

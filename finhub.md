@@ -1,4 +1,4 @@
-# FinHub — Agentic AI for Safe Financial Document Replication
+# FinHub - Agentic Document Resolution Workbench
 
 > Business and design narrative for this prototype. For setup, commands, and eval how-to, start with [`README.md`](README.md).
 
@@ -18,7 +18,7 @@ Real production landscapes see many failure types. **This prototype focuses on t
 
 ## Prototype Goal
 
-This prototype validates whether an Agentic AI workflow can execute failed-document remediation safely **without relying on SAP data or SAP APIs**.
+FinHub validates whether an Agentic AI workflow can execute failed-document remediation safely **without relying on SAP data or SAP APIs**.
 
 The project uses synthetic finance documents and vendor-neutral mock systems to simulate a Central Finance-style failure queue. The goal is not to replicate SAP technically. The goal is to prove the operating model:
 
@@ -63,7 +63,7 @@ The workflow is structured as:
 - **Diagnosis agent** — classifies the root cause and captures evidence (via deterministic classifier).
 - **Remediation planner** — proposes the next action, approval requirement, and reprocessing path.
 - **Governance agent** — applies deterministic policy checks and invokes controlled reprocess only when allowed.
-- **Analyst summary writer** — produces a short plain-English explanation for finance analysts (`agent_summary`). Uses `SUMMARY_MODEL` when `SUMMARY_USE_LLM=1`; otherwise stores eval-aligned deterministic text.
+- **Analyst summary writer** — produces a short plain-English explanation for finance analysts (`agent_summary`). Uses `SUMMARY_MODEL=gpt-4o` when `SUMMARY_USE_LLM=1`; otherwise stores eval-aligned deterministic text.
 
 Agents do not directly mutate finance state. State-changing behavior lives in guarded tools backed by deterministic services.
 
@@ -85,17 +85,18 @@ The agent is an orchestrator inside a controlled execution boundary, not an unch
 | Layer | Technology |
 |-------|------------|
 | Runtime | Python, `uv` |
-| Agent orchestration | OpenAI Agents SDK (`gpt-4o-mini` default) |
+| Agent orchestration | OpenAI Agents SDK (`gpt-4o-mini` for all operational agents) |
+| Analyst summaries | `gpt-4o` when `SUMMARY_USE_LLM=1`; deterministic template otherwise |
 | Policy & services | Deterministic Python (`services.py`, `workflow.py`) |
 | Evals | Promptfoo — deterministic (12 cases) + summary LLM judge (10 golden docs) |
 | Observability | Langfuse + OpenTelemetry (optional) — agent spans + `analyst-summary` generation |
-| Demo UI | React exception workbench + FastAPI (`frontend/`, `src/cfin_agents/api.py`) |
+| Demo UI | React document resolution workbench + FastAPI (`frontend/`, `src/cfin_agents/api.py`) |
 | Persistence | SQLite tickets/staging + local or S3 attachments (`FINHUB_DATA_DIR`) |
 | Deployment | Railway — multi-stage **`Dockerfile`** ([`DEPLOYMENT.md`](DEPLOYMENT.md)) |
 
 ## Exception Workbench (demo UI)
 
-The workbench is the portfolio-facing demo surface. Operators triage agent-created tickets without SAP connectivity.
+The workbench is the primary demo surface. Operators triage agent-created tickets without SAP connectivity.
 
 **Demo flow (UI only):**
 
@@ -147,7 +148,7 @@ The prototype shows how an Agentic AI solution can reduce manual triage and hand
 
 > AI agents accelerate diagnosis, evidence gathering, remediation planning, workflow tracking, and controlled reprocessing while deterministic guardrails and human approvals protect finance-critical decisions.
 
-The demo is realistic, portable, and suitable for portfolio sharing without exposing enterprise SAP data.
+The demo uses synthetic data only — no enterprise SAP connectivity required.
 
 ## Documentation map
 
@@ -155,6 +156,7 @@ The demo is realistic, portable, and suitable for portfolio sharing without expo
 |-----|-----------|
 | [`README.md`](README.md) | Running the app, evals, deployment |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Technical architecture, data model, API |
+| [`docs/LANGFUSE-TRACE-EXAMPLE.md`](docs/LANGFUSE-TRACE-EXAMPLE.md) | Sample Langfuse trace explained |
 | [`finhub.md`](finhub.md) | Explaining the business case (this file) |
 | [`Evals-Journey.md`](Evals-Journey.md) | Understanding the eval methodology and decisions |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | Deploying to Railway |

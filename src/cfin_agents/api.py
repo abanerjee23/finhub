@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
-
-from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -14,15 +13,21 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
+from cfin_agents import document_store
+from cfin_agents.analyst_summary import resolve_agent_summary
 from cfin_agents.attachment_store import (
     ALLOWED_CONTENT_TYPES,
     MAX_ATTACHMENT_BYTES,
     read_attachment_bytes,
     save_attachment_bytes,
 )
-from cfin_agents.analyst_summary import resolve_agent_summary
-from cfin_agents.batch import bootstrap_demo, bootstrap_golden_document, diagnose_new_records, load_tickets, save_tickets
-from cfin_agents import document_store
+from cfin_agents.batch import (
+    bootstrap_demo,
+    bootstrap_golden_document,
+    diagnose_new_records,
+    load_tickets,
+    save_tickets,
+)
 from cfin_agents.observability import langfuse_status, langfuse_trace_url
 from cfin_agents.paths import attachment_backend_name, runtime_data_dir
 from cfin_agents.seed_queue import reset_workbench
@@ -259,7 +264,7 @@ def update_ticket_description(ticket_id: str, request: DescriptionUpdateRequest)
 @app.post("/api/tickets/{ticket_id}/attachments")
 async def upload_ticket_attachment(
     ticket_id: str,
-    file: UploadFile = File(...),
+    file: Annotated[UploadFile, File()],
     actor: str = "Workbench User",
     purpose: str = "resolution_proof",
 ) -> Ticket:
@@ -268,7 +273,10 @@ async def upload_ticket_attachment(
     if content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{content_type}'. Upload images, PDF, CSV, Excel, or text files.",
+            detail=(
+                f"Unsupported file type '{content_type}'. "
+                "Upload images, PDF, CSV, Excel, or text files."
+            ),
         )
 
     content = await file.read()
@@ -496,7 +504,7 @@ def _summary_source_label() -> str:
     disable_llm = os.getenv("DISABLE_LLM", "0").lower() in {"1", "true", "yes"}
     has_key = bool(os.getenv("OPENAI_API_KEY"))
     if use_llm and has_key and not disable_llm:
-        return f"llm:{os.getenv('SUMMARY_MODEL', 'gpt-4o-mini')}"
+        return f"llm:{os.getenv('SUMMARY_MODEL', 'gpt-4o')}"
     return "deterministic_eval_template"
 
 

@@ -11,9 +11,8 @@ echo "==> Running workflow smoke check"
 uv run python scripts/smoke_check.py
 
 echo "==> Running Promptfoo deterministic evals"
-PROMPTFOO_CONFIG_DIR=.promptfoo \
-PROMPTFOO_DISABLE_WAL_MODE=true \
-PROMPTFOO_PYTHON=.venv/bin/python \
-npx promptfoo eval -c evals/promptfooconfig.yaml --no-progress-bar
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/promptfoo_common.sh"
+npx promptfoo eval -c evals/promptfooconfig.yaml --no-progress-bar "${PROMPTFOO_SHARE_FLAG[@]}"
 
 echo "Deterministic eval suite completed successfully."

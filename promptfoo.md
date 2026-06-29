@@ -533,6 +533,22 @@ set -a && source .env && set +a
 Summary evals need `OPENAI_API_KEY` (for `agent_summary` generation and the LLM judge).
 Deterministic evals do **not** need an API key.
 
+### FinHub project isolation (important)
+
+FinHub stores Promptfoo results in **`.promptfoo/` inside this repo**, not in your global
+`~/.promptfoo` folder. The run scripts set `PROMPTFOO_CONFIG_DIR=.promptfoo` automatically.
+
+If you open plain `npx promptfoo view` without that variable, you may see evals from a
+**different project** on your machine (for example an older "Subscription Intelligence"
+suite). Use:
+
+```bash
+bash scripts/promptfoo_view.sh
+```
+
+You do **not** need a Promptfoo cloud account for FinHub evals. Scripts pass `--no-share` so
+results stay local unless you explicitly run `promptfoo auth login` and `eval --share`.
+
 ---
 
 ### Option A — Run scripts (easiest)
@@ -601,7 +617,8 @@ interactively:
 
 ```bash
 cd /path/to/finhub
-PROMPTFOO_CONFIG_DIR=.promptfoo npx promptfoo view
+bash scripts/promptfoo_view.sh
+# or: PROMPTFOO_CONFIG_DIR=.promptfoo npx promptfoo view
 ```
 
 Then open in your browser:

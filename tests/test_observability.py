@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from cfin_agents.observability import (
     langfuse_enabled,
     langfuse_host,
@@ -16,15 +14,13 @@ def test_langfuse_host_reads_base_url(monkeypatch) -> None:
     assert langfuse_host() == "https://cloud.langfuse.com"
 
 
-def test_langfuse_trace_url() -> None:
-    url = langfuse_trace_url("trace-abc123")
-    assert url is None
+def test_langfuse_trace_url(monkeypatch) -> None:
+    monkeypatch.delenv("LANGFUSE_HOST", raising=False)
+    monkeypatch.delenv("LANGFUSE_BASE_URL", raising=False)
+    assert langfuse_trace_url("trace-abc123") is None
 
-    os.environ["LANGFUSE_BASE_URL"] = "https://cloud.langfuse.com"
-    try:
-        assert langfuse_trace_url("trace-abc123") == "https://cloud.langfuse.com/trace/trace-abc123"
-    finally:
-        os.environ.pop("LANGFUSE_BASE_URL", None)
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+    assert langfuse_trace_url("trace-abc123") == "https://cloud.langfuse.com/trace/trace-abc123"
 
 
 def test_langfuse_enabled_with_base_url(monkeypatch) -> None:

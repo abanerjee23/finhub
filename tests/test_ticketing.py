@@ -52,7 +52,9 @@ def test_generated_records_can_be_diagnosed_and_ticketed() -> None:
     assert all(ticket.timeline for ticket in tickets)
 
 
-def test_ticket_narratives_use_plain_english() -> None:
+def test_ticket_narratives_use_plain_english(monkeypatch) -> None:
+    monkeypatch.setenv("SUMMARY_USE_LLM", "0")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     records = generate_staged_failures(count=12, seed=7)
     repository = StagedDocumentRepository(records)
     workflow = DeterministicWorkflow(repository=repository, approval_store=ApprovalStore())
@@ -91,7 +93,7 @@ def test_ticket_narratives_use_plain_english() -> None:
 def test_bootstrap_demo_does_not_reload_existing_tickets_when_resetting(
     tmp_path, monkeypatch
 ) -> None:
-    from cfin_agents import batch, document_store
+    from cfin_agents import document_store
 
     monkeypatch.setattr(document_store, "DB_PATH", tmp_path / "finhub.db")
 
@@ -102,7 +104,7 @@ def test_bootstrap_demo_does_not_reload_existing_tickets_when_resetting(
 def test_ticket_comment_is_persisted(tmp_path, monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
-    from cfin_agents import batch, document_store
+    from cfin_agents import document_store
     from cfin_agents.api import app
 
     monkeypatch.setattr(document_store, "DB_PATH", tmp_path / "finhub.db")
@@ -128,7 +130,7 @@ def test_ticket_comment_is_persisted(tmp_path, monkeypatch) -> None:
 def test_ticket_description_can_be_edited(tmp_path, monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
-    from cfin_agents import batch, document_store
+    from cfin_agents import document_store
     from cfin_agents.api import app
 
     monkeypatch.setattr(document_store, "DB_PATH", tmp_path / "finhub.db")
@@ -159,7 +161,7 @@ def test_ticket_description_can_be_edited(tmp_path, monkeypatch) -> None:
 def test_ticket_status_can_be_updated(tmp_path, monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
-    from cfin_agents import batch, document_store
+    from cfin_agents import document_store
     from cfin_agents.api import app
 
     monkeypatch.setattr(document_store, "DB_PATH", tmp_path / "finhub.db")
@@ -204,7 +206,7 @@ def test_resolved_status_requires_proof_attachment(tmp_path, monkeypatch) -> Non
 
     from fastapi.testclient import TestClient
 
-    from cfin_agents import batch, document_store
+    from cfin_agents import document_store
     from cfin_agents.api import app
 
     monkeypatch.setattr(document_store, "DB_PATH", tmp_path / "finhub.db")

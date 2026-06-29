@@ -43,7 +43,7 @@
 | LLM-as-judge wired | ✅ Done | `src/cfin_agents/summary_judge.py` |
 | Judge calibration (automated) | ✅ Done | **6/6** agreed with human labels |
 | Live judged evals (automated) | ✅ Done | **10/10 pass** on multi-agent path (`eval-dly-2026-06-25T16:35:05`) |
-| Multi-agent workflow evals | ✅ Done | `gpt-4o-mini` agents + summary, `gpt-4o` judge — **51/51** full suite |
+| Multi-agent workflow evals | ✅ Done | `gpt-4o-mini` operational agents, `gpt-4o` summary writer + judge — **51/51** full suite |
 | POC eval methodology | ✅ Done | Full loop validated |
 | Golden expansion (10 docs) | ✅ Done | `evals/summary_cases.yaml` — all 10 scenarios |
 | CI eval gate | ✅ Done | `.github/workflows/ci.yml` — deterministic on PR; summary on dispatch |
@@ -87,14 +87,12 @@ flowchart LR
 | Two eval layers | ✅ | Deterministic (structure) + Summary (quality) |
 | Full suite green | ✅ | Deterministic 12/12; calibration 6/6; summary **10/10** |
 
-**One-line summary:** The **eval methodology and scale + ops layer are complete** for portfolio sharing. Optional polish: screenshots, public repo hygiene, repeated judge runs for variance tracking.
+**One-line summary:** The **eval methodology and scale + ops layer are complete**. Optional follow-ups: repeated judge runs for variance tracking.
 
-### What is not complete yet (optional polish)
+### What is not complete yet (optional follow-ups)
 
 | Gap | Why it matters |
 |-----|----------------|
-| **Portfolio visuals** | Recruiters respond better to screenshots/GIFs |
-| **Public repo hygiene** | Rotate keys, verify `.env` never committed |
 | **Judge variance tracking** | Repeated runs build confidence beyond one green batch |
 | **Production monitoring** | Evals test the prototype; they do not watch live traffic |
 
@@ -105,7 +103,7 @@ flowchart LR
 - [x] Log judge scores + reasoning to `evals/model_outputs.jsonl` (+ optional Excel export)
 - [x] Eval result logging (JSONL + Promptfoo viewer)
 - [x] Railway deployment guide
-- [ ] Add screenshots / demo GIF for portfolio
+- [x] Workbench, Langfuse, and Promptfoo screenshots in README
 - [ ] Re-calibrate judge only when rubric or `SUMMARY_JUDGE_MODEL` changes
 
 See [Why Excel was left at 3 docs](#why-excel-was-left-at-3-docs) for the rationale — Excel sync is intentionally not planned.
@@ -116,7 +114,7 @@ See [Why Excel was left at 3 docs](#why-excel-was-left-at-3-docs) for the ration
 
 **Decision:** Keep `AI Evals_SM5_v0.6.xlsx` as-is (3 human-labeled golden docs + rubric + 6 calibration rows). Do **not** extend Excel to all 10 scenarios.
 
-**Portfolio framing:** Excel was the **human methodology layer** — it defines what “good” looks like and calibrates the LLM judge. YAML scales that standard to full regression coverage. See [How to phrase it](#how-to-phrase-it-portfolio) below.
+**Methodology:** Excel was the **human methodology layer** — it defines what “good” looks like and calibrates the LLM judge. YAML scales that standard to full regression coverage.
 
 ### What Excel actually did
 
@@ -154,12 +152,6 @@ These are related but not the same thing:
 The **3 Excel golden docs** anchor both (one exemplar per policy shape). The **6 calibration rows** are what prove the judge is trustworthy — they are fixed summaries with known human pass/fail labels, not live workflow runs.
 
 Calibration path: `evals/promptfoo_summary_calibration_config.yaml` → **6/6** agreed with human labels.
-
-### How to phrase it (portfolio)
-
-> I built a human golden dataset and rubric to define what a good finance analyst summary looks like, then calibrated an LLM-as-judge against human pass/fail examples. That calibrated judge automates summary quality evals in CI. The original Excel workbook captures the human benchmark; YAML extends it to full scenario coverage for regression testing.
-
-This is accurate without overclaiming that all 10 docs were human-labeled.
 
 ### What we claim vs what we do not claim
 
@@ -203,7 +195,7 @@ This is the current default workflow when `OPENAI_API_KEY` is set and `DISABLE_L
 | `CFIN Diagnosis Agent` | `OPENAI_MODEL` → `gpt-4o-mini` | Calls the deterministic classifier for failure scenario, reason code, root cause, and evidence. |
 | `CFIN Remediation Planner` | `OPENAI_MODEL` → `gpt-4o-mini` | Calls the planner to choose the remediation action and whether approval is required. |
 | `CFIN Governance Agent` | `OPENAI_MODEL` → `gpt-4o-mini` | Calls policy guardrails and reprocesses only when allowed. |
-| Analyst summary writer | `SUMMARY_MODEL` → `gpt-4o-mini` | Writes the final finance-analyst summary from the structured workflow output. |
+| Analyst summary writer | `SUMMARY_MODEL` → `gpt-4o` | Writes the final finance-analyst summary from the structured workflow output. |
 | LLM judge | `SUMMARY_JUDGE_MODEL` → `gpt-4o` | Scores `agent_summary` during Promptfoo summary evals only. |
 
 The agents do not directly mutate enterprise state. They call guarded tools backed by deterministic services:
@@ -239,7 +231,7 @@ flowchart TB
     end
 
     FINAL[Authoritative deterministic pass<br/>status, action, audit, result]
-    SUMMARY[Analyst summary<br/>SUMMARY_MODEL = gpt-4o-mini]
+    SUMMARY[Analyst summary<br/>SUMMARY_MODEL = gpt-4o]
     RUN[WorkflowRun JSON]
     JUDGE[Promptfoo judge<br/>gpt-4o, eval only]
 
@@ -263,7 +255,7 @@ The Remediation Planner calls `propose_remediation`. The plan is `maintain_sourc
 
 The Governance Agent calls `evaluate_governance`. The policy engine allows the action because mapping maintenance is permitted, unlike master-data creation without approval or closed posting periods. The Governance Agent can then call `controlled_reprocess`, which simulates reprocessing under guardrails.
 
-After orchestration completes, the deterministic workflow runs as the final authoritative pass. It records the final status, reason code, action, reprocess result, and audit events. The analyst summary writer then uses `gpt-4o-mini` to produce a short summary such as:
+After orchestration completes, the deterministic workflow runs as the final authoritative pass. It records the final status, reason code, action, reprocess result, and audit events. The analyst summary writer then uses `gpt-4o` to produce a short summary such as:
 
 ```text
 Document posting failed because the cost center source-to-target mapping is missing. Maintain the missing mapping entry manually in the target mapping table, then reprocess the document. No approval is required.
@@ -287,7 +279,7 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 - Railway Volume at `/data` with `FINHUB_DATA_DIR=/data/finhub`, `RAILWAY_RUN_UID=0`
 - Updated `README.md`, `DEPLOYMENT.md`, `ARCHITECTURE.md` with current Railway UI (⌘K volume creation)
 
-**Next:** Portfolio screenshots; optional custom domain.
+**Next:** Optional custom domain.
 
 ---
 
@@ -307,7 +299,7 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 - Updated `README.md`, `CLAUDE.md`, `DEPLOYMENT.md`, `finhub.md`, `.env.example`
 - Code pushed to GitHub (`main`) for Railway deploy-from-repo
 
-**Next:** Railway service variables + volume mount at `FINHUB_DATA_DIR=/data/finhub`; portfolio screenshots.
+**Next:** Railway service variables + volume mount at `FINHUB_DATA_DIR=/data/finhub`.
 
 ---
 
@@ -501,7 +493,7 @@ Promptfoo eval ID: `eval-WoC-2026-06-25T08:33:47`
 
 **What we changed:**
 - Default path: OpenAI Agents SDK orchestration (`DISABLE_LLM=0`)
-- Agents + summary: `gpt-4o-mini` (`OPENAI_MODEL`, `SUMMARY_MODEL`)
+- At the time: agents + summary used `gpt-4o-mini` (`OPENAI_MODEL`, `SUMMARY_MODEL`); current default split is `gpt-4o-mini` agents and `gpt-4o` summaries.
 - Judge: `gpt-4o` (`SUMMARY_JUDGE_MODEL`)
 - Fixed `gpt-5-mini` temperature API errors by moving to `gpt-4o-mini`
 - Updated docs for multi-agent workflow and manual-mapping domain rules
@@ -525,7 +517,7 @@ All live runs confirmed `execution_mode: openai_agents_sdk_guarded`.
 
 ### Session 8 — Scale + ops (10 docs, CI, dashboard, logging, Railway)
 
-**Goal:** Complete the scale + ops checklist for portfolio readiness.
+**Goal:** Complete the scale + ops checklist.
 
 **What we built:**
 - Expanded `evals/summary_cases.yaml` from 3 → **10** golden docs
@@ -534,7 +526,7 @@ All live runs confirmed `execution_mode: openai_agents_sdk_guarded`.
 - Eval result log: `evals/model_outputs.jsonl`
 - GitHub Actions: `.github/workflows/ci.yml` (deterministic on PR, summary on dispatch)
 - Railway guide: `DEPLOYMENT.md`
-- README portfolio pitch + updated eval commands
+- README eval section + updated eval commands
 
 **Commands:**
 
@@ -545,7 +537,7 @@ bash scripts/run_summary_eval_batch.sh       # programmatic batch + log
 bash scripts/dev-workbench.sh                # backend :8000 + frontend :5173
 ```
 
-**Outcome:** ✅ Scale + ops layer complete. **10/10** summary evals green (`eval-dly-2026-06-25T16:35:05`); JSONL batch **10/10** (`eval-20260625T164027Z`). Project is portfolio-ready pending visuals and public repo hygiene.
+**Outcome:** ✅ Scale + ops layer complete. **10/10** summary evals green (`eval-dly-2026-06-25T16:35:05`); JSONL batch **10/10** (`eval-20260625T164027Z`).
 
 ---
 
@@ -1397,11 +1389,10 @@ Model-graded evals are the tool you reach for when deterministic checks run out.
 
 ## Next steps (in order)
 
-Portfolio polish only:
+Optional follow-ups:
 
-1. **Add screenshots / demo GIF** — React workbench UI
-2. **Public repo hygiene** — rotate API keys, confirm `.env` is gitignored
-3. **Optional:** run summary eval batch twice and compare pass rates for judge variance
+1. **Run summary eval batch twice** — compare pass rates for judge variance
+2. **Re-calibrate judge** — only when rubric or `SUMMARY_JUDGE_MODEL` changes
 
 ---
 

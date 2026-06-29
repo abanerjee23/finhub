@@ -1,6 +1,6 @@
 # Railway Deployment
 
-Deploy the FinHub exception workbench (FastAPI + React) to [Railway](https://railway.com). Eval scripts run locally or in GitHub Actions — **not** on Railway.
+Deploy **FinHub - Agentic Document Resolution Workbench** (FastAPI + React) to [Railway](https://railway.com). Eval scripts run locally or in GitHub Actions — **not** on Railway.
 
 For architecture context see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). User-facing overview: [`README.md`](README.md#deploy-to-railway-production).
 
@@ -41,8 +41,8 @@ In the service **Variables** tab:
 |----------|----------|---------|
 | `OPENAI_API_KEY` | **Yes** | Multi-agent orchestration + analyst summaries |
 | `SUMMARY_USE_LLM` | **Recommended** | Set `1` for LLM analyst summaries on tickets |
-| `SUMMARY_MODEL` | No | Default `gpt-4o-mini`; often `gpt-4o` for demos |
-| `OPENAI_MODEL` | No | Default `gpt-4o-mini` for agent orchestration |
+| `OPENAI_MODEL` | No | Default `gpt-4o-mini` for all operational agents |
+| `SUMMARY_MODEL` | No | Default `gpt-4o` for the analyst summary writer |
 | `DISABLE_LLM` | No | Set `0` for multi-agent (default) |
 | `FINHUB_DATA_DIR` | **Recommended** | e.g. `/data/finhub` — SQLite + attachment files |
 | `RAILWAY_RUN_UID` | **Recommended** | Set `0` when using Docker + volumes (write permissions) |
@@ -133,8 +133,8 @@ If Langfuse variables are not set, `"langfuse": {"enabled": false}` is expected 
 4. Open a ticket — add a comment, upload proof on **Resolved** (verifies volume + attachments).
 5. Click **View trace in Langfuse** (when Langfuse is configured) on a newly processed ticket:
    - Root span `agentic-cfin-workflow`
-   - Agent SDK spans (`OPENAI_MODEL`)
-   - Generation `analyst-summary` (`SUMMARY_MODEL`) when `SUMMARY_USE_LLM=1`
+   - Agent SDK spans (`OPENAI_MODEL=gpt-4o-mini`)
+   - Generation `analyst-summary` (`SUMMARY_MODEL=gpt-4o`) when `SUMMARY_USE_LLM=1`
 6. **Persistence check:** redeploy once — tickets should still exist if the volume is mounted correctly.
 
 ## 7. Local development
