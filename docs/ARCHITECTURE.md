@@ -242,13 +242,13 @@ Evals run locally or in GitHub Actions — **not** on the Railway service. See [
 
 ## Deployment topology (Railway)
 
-Single Nixpacks service (Node 20 + Python via `uv`):
+Single Nixpacks service (Node 22 + Python via `uv`):
 
 1. `uv sync` + `npm --prefix frontend ci`
 2. `npm --prefix frontend run build`
 3. `uv run cfin-api` on `$PORT` (binds `0.0.0.0`)
 
-GitHub Actions CI uses Node 22 for frontend steps; Railway build uses Node 20 from `nixpacks.toml` — both produce the same Vite bundle.
+GitHub Actions CI and Railway both use Node 22 for the frontend build. The frontend pins **Vite 6** (not Vite 8) to avoid Rolldown native-binding issues on Linux deploys.
 
 Optional Railway Volume → `FINHUB_DATA_DIR=/data/finhub`.
 

@@ -8,11 +8,11 @@ NIXPACKS_PYTHON_VERSION = "3.11"
 NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"
 
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_22"]
 
 [phases.install]
 cmds = [
-  "npm --prefix frontend ci"
+  "npm --prefix frontend ci --include=optional"
 ]
 
 [phases.build]

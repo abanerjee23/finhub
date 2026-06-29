@@ -15,8 +15,8 @@ For architecture context see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 1. In Railway: **New Project** → **Deploy from GitHub repo**
 2. Select this repository
 3. Railway detects `railway.json` and `nixpacks.toml`:
-   - Installs Python (`uv sync`) and Node 20
-   - Runs `npm --prefix frontend run build`
+   - Installs Python (`uv` + `uv.lock`) and Node 22
+   - Runs `npm --prefix frontend ci` and `npm --prefix frontend run build`
    - Starts `uv run cfin-api` on `$PORT`
 
 ## 2. Configure environment variables
@@ -120,7 +120,7 @@ API_RELOAD=0 uv run cfin-api
 
 - Bundled read-only synthetic data ships in `data/synthetic/`; runtime tickets and attachments use `FINHUB_DATA_DIR`
 - Production frontend uses same-origin `/api` (no separate Vite server); do not set `VITE_API_BASE` unless splitting API and UI
-- **Build troubleshooting:** if deploy logs show `uv: command not found`, ensure `nixpacks.toml` uses `providers = ["python"]` and `NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"` — do not run bare `uv sync` without the Python provider (it installs `uv` from `uv.lock`)
+- **Build troubleshooting:** if deploy logs show `Cannot find native binding` / Rolldown errors, the frontend uses **Vite 6** (not Vite 8) for Linux CI compatibility. If `uv: command not found`, ensure `nixpacks.toml` uses `providers = ["python"]` and `NIXPACKS_PYTHON_PACKAGE_MANAGER = "uv"`.
 - Do not put Promptfoo or eval-only keys in Railway unless you intentionally run evals there
 - Rotate any API key that was ever committed to git before making the repo public
 - CLI seed/sweep (`cfin-seed`, `cfin-sweep`) remain available for automation; the UI workbench loop does not require them
