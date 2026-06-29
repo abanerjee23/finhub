@@ -8,6 +8,8 @@ For the business case and design narrative, see [`finhub.md`](finhub.md).
 
 The primary demo surface is the React **workbench** — a single-screen operations console where finance analysts triage failed documents after autonomous agents have already run. Seed the queue, run agent processing, inspect diagnoses, update ticket status, attach proof, and jump to Langfuse traces — no terminal required.
 
+**Live app:** [https://scalefinhub.up.railway.app/](https://scalefinhub.up.railway.app/)
+
 ![FinHub workbench — ticket detail with agent diagnosis, analytics sidebar, and searchable ticket queue (deployed on Railway)](docs/images/finhub-workbench.png)
 
 **Demo loop:**
