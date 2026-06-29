@@ -195,7 +195,7 @@ export function uploadTicketAttachment(
 }
 
 export function ticketAttachmentUrl(ticketId: string, attachmentId: string): string {
-  const base = import.meta.env.DEV ? "" : import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+  const base = import.meta.env.VITE_API_BASE ?? "";
   return `${base}/api/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}`;
 }
 
