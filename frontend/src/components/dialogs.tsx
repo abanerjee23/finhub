@@ -131,6 +131,10 @@ export function ResolvedProofDialog({
       setError("Upload at least one proof file showing successful reprocessing.");
       return;
     }
+    if (!note.trim()) {
+      setError("Enter a reason for closing this ticket.");
+      return;
+    }
 
     setError(null);
     setUploading(true);
@@ -145,7 +149,7 @@ export function ResolvedProofDialog({
         attachmentIds.push(uploaded.attachment_id);
       }
       await onConfirm({
-        note: note.trim() || undefined,
+        note: note.trim(),
         attachmentIds
       });
     } catch (submitError) {
@@ -218,7 +222,7 @@ export function ResolvedProofDialog({
             <p className="empty">No proof files selected yet.</p>
           )}
           <label htmlFor={`resolved-note-${ticketId}`} className="modal-label">
-            Optional note
+            Reason for closing (required)
           </label>
           <textarea
             id={`resolved-note-${ticketId}`}
@@ -235,7 +239,11 @@ export function ResolvedProofDialog({
             <button className="secondary" disabled={busy} onClick={onCancel} type="button">
               Cancel
             </button>
-            <button disabled={busy || !files.length} onClick={() => void submit()} type="button">
+            <button
+              disabled={busy || !files.length || !note.trim()}
+              onClick={() => void submit()}
+              type="button"
+            >
               {busy ? "Saving..." : "Resolve Ticket"}
             </button>
           </div>

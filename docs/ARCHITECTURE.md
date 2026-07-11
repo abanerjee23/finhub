@@ -97,17 +97,46 @@ Tickets separate **operator workflow** from **agent policy context** and **inter
 | Field | Purpose |
 |-------|---------|
 | `operator_status` | Human-editable queue status: `assigned`, `in_progress`, `blocked`, `resolved` |
-| `workflow_run.status` | Agent policy outcome: `needs_approval`, `blocked`, `reprocessed`, etc. (exposed as `workflow_status` in list API) |
+| `workflow_run.status` | Agent policy / pipeline stage (exposed as `workflow_status` in list API) — see staged pipeline below |
 | `policy_summary` | Plain-English policy guidance from agent run |
 | `agent_summary` | Analyst diagnosis text (persisted at ticket creation; polished on read via `resolve_agent_summary()`) |
 | `timeline[]` | Activity log — ingestion, diagnosis, assignment, manual transitions |
 
 Legacy SQLite payloads with `status`, `policy_status`, `is_pending_approval`, `is_blocked` are migrated on read via `ticket_migration.py`.
 
+**Staged reprocessing pipeline (workbench-only, not part of the deterministic engine):**
+
+`DeterministicWorkflow.run()` always resolves a scenario in one deterministic pass — there is no
+notion of "in progress" in the engine itself. The workbench simulates the real-world lag between a
+human action and the document actually landing in the target system by capping and then advancing
+`workflow_run.status` at the ticket/API layer:
+
+```
+CREATE_TARGET_MASTER_DATA:  needs_approval → [Approve] → approved → (lag) → ready_for_reprocessing → (lag) → reprocessed
+MAINTAIN_SOURCE_MAPPING:    needs_mapping  → [Maintain Mapping] → mapping_maintained → (lag) → ready_for_reprocessing → (lag) → reprocessed
+```
+
+- `needs_mapping` is itself a workbench-only cap: `MAINTAIN_SOURCE_MAPPING` has no approval-store
+  gate in `PolicyEngine`, so a single `workflow.run()` call (CLI, evals) already resolves straight to
+  `reprocessed`. `ticketing.cap_pending_mapping_run()` rolls a freshly-created ticket's *stored*
+  `workflow_run` back to `needs_mapping` with `reprocess_result=None` — this only affects ticket
+  presentation, never the deterministic engine, evals, or CLI single-shot runs.
+- Both `/approve` and `/maintain-mapping` compute the final outcome immediately (cheap and
+  deterministic) but only expose the first stage; `api._schedule_reprocessing_pipeline()` uses two
+  `threading.Timer` callbacks (`WORKFLOW_STAGE_LAG_SECONDS` env, default 6s each) to advance the
+  ticket through `ready_for_reprocessing` and then to the full `reprocessed` result. In-memory only —
+  a mid-pipeline restart leaves a ticket stuck at its last-reached stage (same limitation as the
+  sweep-job registry).
+- Neither action ever sets `operator_status`. The ticket owner manually resolves via
+  `POST /api/tickets/{id}/transition`, which is rejected until `workflow_run.status == reprocessed`
+  for these two actions.
+
 **Governance rules in the UI:**
 
 - **Blocked** — requires a comment (stored on ticket + activity log).
-- **Resolved** — requires at least one proof attachment (image, PDF, CSV, etc.).
+- **Resolved** — requires at least one proof attachment (image, PDF, CSV, etc.) **and** a non-empty
+  reason/note. For `CREATE_TARGET_MASTER_DATA` / `MAINTAIN_SOURCE_MAPPING` tickets, also requires
+  `workflow_run.status == reprocessed`.
 
 ## Persistence
 
@@ -146,9 +175,9 @@ Implementation: `document_store.py`, `attachment_store.py`, `paths.py`, `seed_qu
 | GET | `/api/tickets/{id}` | Detail + narratives + `langfuse_trace_url` |
 | PATCH | `/api/tickets/{id}/description` | Edit ticket title/description |
 | PATCH | `/api/tickets/{id}/assignee` | Reassign owner (timeline `reassigned` event) |
-| POST | `/api/tickets/{id}/transition` | Update `operator_status` (blocked/resolved rules enforced) |
-| POST | `/api/tickets/{id}/approve` | Human approval for `needs_approval` tickets → governed reprocess → resolved |
-| POST | `/api/tickets/{id}/maintain-mapping` | `MP_*` tickets: record mapping entry → reprocess → resolved |
+| POST | `/api/tickets/{id}/transition` | Update `operator_status` (blocked requires note; resolved requires proof + reason, and `reprocessed` if the ticket is on a staged path) |
+| POST | `/api/tickets/{id}/approve` | `needs_approval` only → `approved`, then auto-advances to `ready_for_reprocessing` → `reprocessed` on a delay (see staged pipeline above) |
+| POST | `/api/tickets/{id}/maintain-mapping` | `needs_mapping` only → `mapping_maintained`, then auto-advances the same way |
 | POST | `/api/tickets/{id}/summary-feedback` | 👍/👎 on `agent_summary` → `summary_feedback.jsonl` |
 | POST | `/api/tickets/{id}/comments` | Add comment |
 | POST | `/api/tickets/{id}/attachments` | Upload proof file |
@@ -185,7 +214,7 @@ Still present for scripting; the React workbench uses `/api/workbench/*` instead
 | **Workbench Controls** | Seed count, reset, sweep batch size, refresh, sweep progress bar (job polling) |
 | **Business Impact panel** | Value at risk / total value failed (USD-eq), by company code / source system (click-to-filter), SLA breaches, aging buckets, automation rate |
 | **Analytics panel** | KPIs, status breakdown, owner chart, stage times |
-| **Ticket detail** | Agent diagnosis hero (execution badge, summary feedback, shadow note), approve & maintain-mapping actions, assignee select, metadata, status, comments, attachments, activity log |
+| **Ticket detail** | Agent diagnosis hero (execution badge, summary feedback, shadow note), approve & maintain-mapping actions with a live staged-pipeline stepper (polls while in-flight), assignee select, metadata, status, comments, attachments, activity log |
 | **Search Tickets** | Filters + business-filter chips, sortable table, inline status dropdown, bulk status moves |
 
 Dev: Vite on `:5173` proxies `/api` → `:8000` (same-origin; no `VITE_API_BASE` needed).  

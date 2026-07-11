@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
-from cfin_agents.models import ReasonCode, WorkflowStatus
+from cfin_agents.models import ActionType, ReasonCode, WorkflowRun, WorkflowStatus
 from cfin_agents.ticket_models import (
     AgingBucket,
     OperatorStatus,
@@ -80,7 +80,34 @@ def role_routing_for_reason(
     return routing[reason_code]
 
 
+def cap_pending_mapping_run(workflow_run: WorkflowRun) -> WorkflowRun:
+    """Roll a freshly-computed MAINTAIN_SOURCE_MAPPING run back to a pending state.
+
+    DeterministicWorkflow.run() requires no approval for this action, so it
+    always resolves straight to REPROCESSED in one pass — useful for CLI/eval
+    single-shot runs, but wrong for a newly staged ticket: no analyst has
+    actually entered the mapping yet. The workbench gates the real reprocess
+    behind the Maintain Mapping action instead (see api.py); this only affects
+    ticket presentation, never the deterministic engine or evals.
+    """
+    if (
+        workflow_run.remediation_plan.action != ActionType.MAINTAIN_SOURCE_MAPPING
+        or workflow_run.status != WorkflowStatus.REPROCESSED
+    ):
+        return workflow_run
+    return workflow_run.model_copy(
+        update={
+            "status": WorkflowStatus.NEEDS_MAPPING,
+            "reprocess_result": None,
+            "governance_decision": workflow_run.governance_decision.model_copy(
+                update={"status": WorkflowStatus.NEEDS_MAPPING}
+            ),
+        }
+    )
+
+
 def create_ticket(record: StagedFailureRecord, workflow_run) -> Ticket:
+    workflow_run = cap_pending_mapping_run(workflow_run)
     owner_role, tagged_roles, policy_owner = role_routing_for_reason(
         workflow_run.diagnosis.reason_code
     )

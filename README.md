@@ -133,6 +133,7 @@ The **workbench UI** (`Reset & seed` / `Run agent processing`) is the recommende
 - `SUMMARY_JUDGE_MODEL`: model for Promptfoo LLM judge evals, defaults to `gpt-4o` (evals only).
 - `DISABLE_LLM`: set to `1` to force deterministic execution (no agent orchestration).
 - `CONFIDENCE_REVIEW_THRESHOLD`: diagnosis confidence below this value routes to human review (`needs_approval`), defaults to `0.5` (the deterministic classifier emits 0.8-0.95, so the default never changes existing eval outcomes).
+- `WORKFLOW_STAGE_LAG_SECONDS`: seconds between each staged transition in the workbench's human-in-the-loop reprocessing pipeline (`approved`/`mapping_maintained` → `ready_for_reprocessing` → `reprocessed`), defaults to `6`. Simulates the real-world lag between a sign-off and the document landing in the target system instead of resolving instantly.
 - `FINHUB_DATA_DIR`: directory for SQLite DB and local attachments (default: `data/synthetic`; on Railway use `/data/finhub` with a mounted volume).
 - `RAILWAY_RUN_UID`: set to `0` on Railway when using Docker + volumes (Railway-only; not in local `.env`).
 - `STORAGE_BACKEND`: `local` (default) or `s3` for attachment blob storage.

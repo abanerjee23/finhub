@@ -272,6 +272,51 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 
 ## Session log
 
+### 2026-07-11b — Staged reprocessing pipeline (approve/mapping no longer auto-resolve)
+
+**Focus:** Fix a realism gap in the previous session's Approve/Maintain Mapping actions — they were
+resolving tickets atomically, with no lag between sign-off and reprocessing. Fixed after user
+feedback: "in a real scenario, there will be a lag between approval and the doc actually being
+reprocessed."
+
+**Delivered:**
+
+- New workbench-only `WorkflowStatus` values (`needs_mapping`, `approved`, `mapping_maintained`,
+  `ready_for_reprocessing`) — never produced by `DeterministicWorkflow.run()`, only assigned/advanced
+  by the API layer. `evals/provider.py` and `evals/summary_provider.py` call `workflow.run()`
+  directly, so this ticket-presentation-layer change has zero effect on the 12/12 deterministic and
+  golden summary evals (verified before and after).
+- `ticketing.cap_pending_mapping_run()`: `MAINTAIN_SOURCE_MAPPING` has no approval-store gate in
+  `PolicyEngine`, so a single deterministic run already resolves to `reprocessed` — freshly created
+  mapping tickets are now capped back to `needs_mapping` at ticket-creation time so the UI action
+  has something to gate on.
+- `POST /api/tickets/{id}/approve` and `.../maintain-mapping` now compute the final outcome
+  immediately but only expose the first stage (`approved`/`mapping_maintained`, no
+  `reprocess_result` yet, ticket stays `assigned`/`in_progress`). A background two-stage
+  `threading.Timer` pipeline (`WORKFLOW_STAGE_LAG_SECONDS`, default 6s/stage) advances the ticket to
+  `ready_for_reprocessing` then to the full `reprocessed` result.
+- `POST /api/tickets/{id}/transition` to `resolved` now requires a non-empty reason (previously
+  optional) in addition to proof attachments, and is rejected with a 400 until
+  `workflow_run.status == reprocessed` for the two staged actions — closing a ticket is now a
+  deliberate final step by the ticket owner, not implied by the pipeline finishing.
+- Confirmed the golden summary calibration doesn't regress: the `MP_*` deterministic template text
+  is already written in "pending" framing (`example_good_summary` in `summary_cases.yaml` matches
+  exactly), so no changes were needed in `analyst_summary.py`; `_approved_master_data_summary()`
+  (master-data "completed" narrative) isn't exercised by any `approve: true` golden case either.
+- Frontend: pipeline stepper on the ticket detail (`Needs Approval → Approved → Ready for
+  Reprocessing → Reprocessed`, or the mapping equivalent) with live polling while a ticket is
+  mid-pipeline; Approve/Maintain Mapping buttons now gate on `needs_approval`/`needs_mapping`
+  specifically; resolve dialog's reason field is now required.
+- Deterministic evals 12/12 unchanged; pytest 62 → rewrote 3 tests for the staged lifecycle, added
+  guard-rejection assertions (resolve-before-reprocessed, resolve-without-reason, duplicate
+  approve/maintain-mapping while in-flight).
+
+**Next:** Consider whether `CLOSED_POSTING_PERIOD`/blocked tickets should ever get a similar staged
+treatment (currently exempt — operators can resolve them manually regardless of workflow status,
+matching the "external controller fixes it outside the system" business reality).
+
+---
+
 ### 2026-07-11 — Human-in-the-loop actions, business metrics, feedback + shadow-mode logging
 
 **Focus:** Close the approval loop in the UI, business-value dashboard, and two new eval feedback signals.

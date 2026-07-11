@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   approveTicket,
   AssigneeOption,
+  getTicket,
   maintainTicketMapping,
   patchTicketDescription,
   postSummaryFeedback,
@@ -18,11 +19,15 @@ import {
   formatJourneyTimestamp,
   formatTicketDate,
   humanize,
+  MAPPING_PIPELINE_STEPS,
+  MASTER_DATA_PIPELINE_STEPS,
   RESOLUTION_BENCHMARK_DAYS,
   splitIntoSentences,
   STAGE_LABELS,
   ticketDescription,
-  ticketDueDate
+  ticketDueDate,
+  TRANSITIONAL_WORKFLOW_STATUSES,
+  WORKFLOW_STATUS_LABELS
 } from "../lib/format";
 import { ApproveDialog, MaintainMappingDialog, StatusChangeOptions } from "./dialogs";
 import { StatusSelect } from "./StatusSelect";
@@ -57,6 +62,8 @@ export function TicketDetailPanel({
   ) => Promise<void>;
   onWorkflowAction: (message: string) => void;
 }) {
+  useReprocessingPoll(ticket, onTicketUpdate);
+
   if (loading) {
     return <p className="empty">Loading ticket details...</p>;
   }
@@ -81,6 +88,8 @@ export function TicketDetailPanel({
         onTicketUpdate={onTicketUpdate}
         onWorkflowAction={onWorkflowAction}
       />
+
+      <ReprocessingPipeline ticket={ticket} />
 
       <div className="detail-grid">
         <Info label="Source System" value={ticket.source_system} />
@@ -110,6 +119,72 @@ export function TicketDetailPanel({
   );
 }
 
+const POLL_INTERVAL_MS = 1500;
+
+function useReprocessingPoll(
+  ticket: TicketDetail | null,
+  onTicketUpdate: (ticket: TicketDetail) => void
+) {
+  const ticketId = ticket?.ticket_id ?? null;
+  const status = ticket?.workflow_run.status ?? null;
+  const isTransitional = status !== null && TRANSITIONAL_WORKFLOW_STATUSES.has(status);
+
+  useEffect(() => {
+    if (!ticketId || !isTransitional) return;
+    let cancelled = false;
+    const interval = window.setInterval(async () => {
+      try {
+        const updated = await getTicket(ticketId);
+        if (!cancelled) onTicketUpdate(updated);
+      } catch {
+        // Transient poll failure; next tick retries.
+      }
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [ticketId, isTransitional, onTicketUpdate]);
+}
+
+function ReprocessingPipeline({ ticket }: { ticket: TicketDetail }) {
+  const action = ticket.workflow_run.remediation_plan.action;
+  const status = ticket.workflow_run.status;
+  const steps =
+    action === "create_target_master_data"
+      ? MASTER_DATA_PIPELINE_STEPS
+      : action === "maintain_source_mapping"
+        ? MAPPING_PIPELINE_STEPS
+        : null;
+
+  if (!steps) return null;
+  // Only show once the operator has kicked off the pipeline — the CTA button
+  // is enough for the initial needs_approval/needs_mapping state.
+  if (status === steps[0].key) return null;
+
+  const currentIndex = steps.findIndex((step) => step.key === status);
+
+  return (
+    <div className="reprocessing-pipeline">
+      {steps.map((step, index) => (
+        <div
+          className={`pipeline-step ${index <= currentIndex ? "pipeline-step-done" : ""} ${
+            index === currentIndex ? "pipeline-step-current" : ""
+          }`}
+          key={step.key}
+        >
+          <span className="pipeline-node" />
+          <span className="pipeline-label">{step.label}</span>
+          {index < steps.length - 1 ? <span className="pipeline-connector" /> : null}
+        </div>
+      ))}
+      {currentIndex >= 0 && currentIndex < steps.length - 1 ? (
+        <span className="pipeline-hint">Advancing automatically…</span>
+      ) : null}
+    </div>
+  );
+}
+
 function WorkflowActions({
   ticket,
   onTicketUpdate,
@@ -126,7 +201,7 @@ function WorkflowActions({
   const workflowStatus = ticket.workflow_run.status;
   const mappingLabel = mappingLabelForReason(ticket.reason_code);
   const canApprove = workflowStatus === "needs_approval";
-  const canMaintainMapping = mappingLabel !== null && ticket.operator_status !== "resolved";
+  const canMaintainMapping = mappingLabel !== null && workflowStatus === "needs_mapping";
 
   if (!canApprove && !canMaintainMapping) return null;
 
@@ -158,11 +233,9 @@ function WorkflowActions({
               const updated = await approveTicket(ticket.ticket_id, { note });
               onTicketUpdate(updated);
               setApproveOpen(false);
-              const targetId = updated.workflow_run.reprocess_result?.target_document_id;
               onWorkflowAction(
-                targetId
-                  ? `Approval recorded. Document reprocessed as ${targetId}.`
-                  : "Approval recorded."
+                "Approval recorded. Master data creation and reprocessing are now queued — " +
+                  "this ticket will advance automatically over the next moment."
               );
             } finally {
               setBusy(false);
@@ -185,11 +258,9 @@ function WorkflowActions({
               });
               onTicketUpdate(updated);
               setMappingOpen(false);
-              const targetId = updated.workflow_run.reprocess_result?.target_document_id;
               onWorkflowAction(
-                targetId
-                  ? `Mapping maintained. Document reprocessed as ${targetId}.`
-                  : "Mapping maintained."
+                "Mapping maintained. Reprocessing is now queued — this ticket will advance " +
+                  "automatically over the next moment."
               );
             } finally {
               setBusy(false);
@@ -356,10 +427,8 @@ function AgentSummaryHero({
 
 function policyNoteFromTicket(ticket: TicketDetail): string | null {
   const status = ticket.workflow_run.status ?? ticket.workflow_status;
-  if (status === "needs_approval") return "Approval required";
   if (status === "blocked") return "Policy blocked";
-  if (status === "reprocessed") return "Reprocessed";
-  return null;
+  return WORKFLOW_STATUS_LABELS[status] ?? null;
 }
 
 function EditableDescription({

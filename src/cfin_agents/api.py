@@ -30,7 +30,7 @@ from cfin_agents.batch import (
     load_staging_records,
     load_tickets,
 )
-from cfin_agents.models import WorkflowRun, WorkflowStatus
+from cfin_agents.models import ActionType, WorkflowRun, WorkflowStatus
 from cfin_agents.observability import langfuse_status, langfuse_trace_url
 from cfin_agents.paths import attachment_backend_name, runtime_data_dir
 from cfin_agents.seed_queue import reset_workbench
@@ -279,6 +279,108 @@ def workbench_sweep_job(job_id: str) -> dict:
         return dict(job)
 
 
+def _stage_lag_seconds() -> float:
+    """Seconds between each staged transition in the human-in-the-loop
+    reprocessing pipeline (Approved/Mapping Maintained -> Ready for
+    Reprocessing -> Reprocessed). Simulates the real lag between a sign-off
+    and the document actually landing in the target system, instead of
+    resolving everything in one request. Read per-call (not cached at import)
+    so tests can override it via env var."""
+    try:
+        return float(os.getenv("WORKFLOW_STAGE_LAG_SECONDS", "6"))
+    except ValueError:
+        return 6.0
+
+
+def _advance_ticket_stage(
+    ticket_id: str,
+    *,
+    action: str,
+    summary: str,
+    next_status: WorkflowStatus | None = None,
+    final_run: WorkflowRun | None = None,
+    details: dict | None = None,
+    comment: str | None = None,
+) -> None:
+    """Advance one ticket's workflow_run.status, reloading it fresh from the
+    store first so a concurrent operator edit (comment, reassignment) made
+    while this stage was pending isn't clobbered."""
+    ticket = document_store.get_ticket(ticket_id)
+    if ticket is None:
+        return  # ticket was reset/deleted while this stage was pending
+    now = utc_now()
+    if final_run is not None:
+        ticket.workflow_run = final_run
+        if final_run.agent_summary:
+            ticket.agent_summary = final_run.agent_summary
+    elif next_status is not None:
+        ticket.workflow_run = ticket.workflow_run.model_copy(update={"status": next_status})
+    ticket.updated_at = now
+    ticket.timeline.append(
+        TicketEvent(
+            timestamp=now,
+            actor="reprocessing_controller",
+            action=action,
+            details=details or {},
+            summary=summary,
+        )
+    )
+    if comment:
+        ticket.comments.append(
+            TicketComment(
+                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+                author="reprocessing_controller",
+                text=comment,
+                created_at=now,
+            )
+        )
+    document_store.upsert_ticket(ticket)
+
+
+def _schedule_reprocessing_pipeline(
+    ticket_id: str,
+    *,
+    ready_summary: str,
+    final_run: WorkflowRun,
+) -> None:
+    lag = _stage_lag_seconds()
+    target_id = (
+        final_run.reprocess_result.target_document_id if final_run.reprocess_result else None
+    )
+
+    def advance_to_reprocessed() -> None:
+        _advance_ticket_stage(
+            ticket_id,
+            action="reprocess_completed",
+            summary=(
+                f"Document reprocessed successfully as {target_id}. "
+                "Ready for the ticket owner to review and resolve."
+                if target_id
+                else "Document reprocessing completed."
+            ),
+            final_run=final_run,
+            details={"target_document_id": target_id},
+            comment=(
+                f"Document reprocessed as {target_id}. Ready to resolve." if target_id else None
+            ),
+        )
+
+    def advance_to_ready() -> None:
+        _advance_ticket_stage(
+            ticket_id,
+            action="ready_for_reprocessing",
+            summary=ready_summary,
+            next_status=WorkflowStatus.READY_FOR_REPROCESSING,
+        )
+        timer = threading.Timer(lag, advance_to_reprocessed)
+        timer.daemon = True
+        timer.start()
+
+    timer = threading.Timer(lag, advance_to_ready)
+    timer.daemon = True
+    timer.start()
+
+
 @app.get("/api/workbench/assignees")
 def workbench_assignees() -> dict:
     return {
@@ -414,57 +516,55 @@ def approve_ticket(ticket_id: str, request: ApproveRequest) -> Ticket:
             detail="Only tickets awaiting approval can be approved.",
         )
 
-    run = _rerun_ticket_workflow(ticket, approve=True)
+    # Compute the eventual outcome now (cheap and deterministic), but only
+    # expose the approval immediately. Master data creation and the reprocess
+    # batch run are simulated as delayed follow-on stages instead of resolving
+    # everything in this one request.
+    final_run = _rerun_ticket_workflow(ticket, approve=True)
     now = utc_now()
     actor = request.actor.strip() or "Workbench User"
     note = (request.note or "").strip()
 
-    ticket.workflow_run = run
-    if run.agent_summary:
-        ticket.agent_summary = run.agent_summary
+    ticket.workflow_run = final_run.model_copy(
+        update={"status": WorkflowStatus.APPROVED, "reprocess_result": None}
+    )
     ticket.timeline.append(
         TicketEvent(
             timestamp=now,
             actor=actor,
             action="approval_recorded",
             details={"note": note},
-            summary="Master data creation approved by a human reviewer.",
+            summary=(
+                "Master data creation approved by a human reviewer. "
+                "Creation and reprocessing are now queued."
+            ),
         )
     )
-
-    reprocessed = bool(run.reprocess_result and run.reprocess_result.success)
-    if reprocessed:
-        target_id = run.reprocess_result.target_document_id
-        previous_status = ticket.operator_status
-        ticket.operator_status = OperatorStatus.RESOLVED
-        ticket.timeline.append(
-            TicketEvent(
-                timestamp=now,
-                actor="reprocessing_controller",
-                action="reprocess_completed",
-                from_status=_operator_as_journey(previous_status),
-                to_status=TicketStatus.RESOLVED,
-                details={"target_document_id": target_id},
-                summary=f"Document reprocessed successfully as {target_id}. Ticket resolved.",
-            )
+    comment_body = "Approved: master data creation signed off. Reprocessing queued."
+    if note:
+        comment_body = f"{comment_body} {note}"
+    ticket.comments.append(
+        TicketComment(
+            comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+            author=actor,
+            text=comment_body,
+            created_at=now,
         )
-        comment_body = (
-            f"Approved: master data creation signed off. Document reprocessed as {target_id}."
-        )
-        if note:
-            comment_body = f"{comment_body} {note}"
-        ticket.comments.append(
-            TicketComment(
-                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
-                author=actor,
-                text=comment_body,
-                created_at=now,
-            )
-        )
-
+    )
     ticket.updated_at = now
     ticket.current_stage_started_at = now
     document_store.upsert_ticket(ticket)
+
+    if bool(final_run.reprocess_result and final_run.reprocess_result.success):
+        _schedule_reprocessing_pipeline(
+            ticket_id,
+            ready_summary=(
+                "Master data created and the source-to-target mapping maintained "
+                "in the target system. Ready for reprocessing."
+            ),
+            final_run=final_run,
+        )
+
     return enrich_ticket(ticket)
 
 
@@ -492,6 +592,12 @@ def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> 
             detail="Mapping maintenance only applies to missing-mapping (MP_*) tickets.",
         )
 
+    if ticket.workflow_run.status != WorkflowStatus.NEEDS_MAPPING:
+        raise HTTPException(
+            status_code=400,
+            detail="This ticket's mapping has already been maintained.",
+        )
+
     target_value = request.target_value.strip()
     if not target_value:
         raise HTTPException(status_code=400, detail="Target value cannot be empty.")
@@ -500,14 +606,17 @@ def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> 
         ticket, mapping_type
     )
 
-    run = _rerun_ticket_workflow(ticket, approve=False)
+    # As with approve_ticket: compute the eventual outcome now, but only
+    # expose the mapping-maintained stage immediately. Reprocessing runs as a
+    # delayed follow-on to simulate the real batch-job lag.
+    final_run = _rerun_ticket_workflow(ticket, approve=False)
     now = utc_now()
     actor = request.actor.strip() or "Workbench User"
     note = (request.note or "").strip()
 
-    ticket.workflow_run = run
-    if run.agent_summary:
-        ticket.agent_summary = run.agent_summary
+    ticket.workflow_run = final_run.model_copy(
+        update={"status": WorkflowStatus.MAPPING_MAINTAINED, "reprocess_result": None}
+    )
     ticket.timeline.append(
         TicketEvent(
             timestamp=now,
@@ -520,45 +629,35 @@ def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> 
             },
             summary=(
                 f"Source-to-target {mapping_type.replace('_', ' ')} mapping maintained: "
-                f"{source_value} → {target_value}."
+                f"{source_value} → {target_value}. Reprocessing is now queued."
             ),
         )
     )
-
-    reprocessed = bool(run.reprocess_result and run.reprocess_result.success)
-    if reprocessed:
-        target_id = run.reprocess_result.target_document_id
-        previous_status = ticket.operator_status
-        ticket.operator_status = OperatorStatus.RESOLVED
-        ticket.timeline.append(
-            TicketEvent(
-                timestamp=now,
-                actor="reprocessing_controller",
-                action="reprocess_completed",
-                from_status=_operator_as_journey(previous_status),
-                to_status=TicketStatus.RESOLVED,
-                details={"target_document_id": target_id},
-                summary=f"Document reprocessed successfully as {target_id}. Ticket resolved.",
-            )
+    comment_body = f"Mapping maintained ({source_value} → {target_value}). Reprocessing queued."
+    if note:
+        comment_body = f"{comment_body} {note}"
+    ticket.comments.append(
+        TicketComment(
+            comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+            author=actor,
+            text=comment_body,
+            created_at=now,
         )
-        comment_body = (
-            f"Mapping maintained ({source_value} → {target_value}); "
-            f"document reprocessed as {target_id}."
-        )
-        if note:
-            comment_body = f"{comment_body} {note}"
-        ticket.comments.append(
-            TicketComment(
-                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
-                author=actor,
-                text=comment_body,
-                created_at=now,
-            )
-        )
-
+    )
     ticket.updated_at = now
     ticket.current_stage_started_at = now
     document_store.upsert_ticket(ticket)
+
+    if bool(final_run.reprocess_result and final_run.reprocess_result.success):
+        _schedule_reprocessing_pipeline(
+            ticket_id,
+            ready_summary=(
+                f"Mapping confirmed in the target system ({source_value} → {target_value}). "
+                "Ready for reprocessing."
+            ),
+            final_run=final_run,
+        )
+
     return enrich_ticket(ticket)
 
 
@@ -640,15 +739,38 @@ def transition_ticket(ticket_id: str, request: TransitionRequest) -> Ticket:
                 detail="A comment is required when setting status to Blocked.",
             )
 
-    if request.operator_status == OperatorStatus.RESOLVED and not request.attachment_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="At least one reprocessing proof attachment is required when resolving.",
-        )
+    if request.operator_status == OperatorStatus.RESOLVED:
+        if not request.attachment_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one reprocessing proof attachment is required when resolving.",
+            )
+        if not (request.note or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="A reason is required when resolving a ticket.",
+            )
 
     ticket = _require_ticket(ticket_id)
 
     if request.operator_status == OperatorStatus.RESOLVED:
+        plan_action = ticket.workflow_run.remediation_plan.action
+        staged_actions = (
+            ActionType.CREATE_TARGET_MASTER_DATA,
+            ActionType.MAINTAIN_SOURCE_MAPPING,
+        )
+        needs_reprocess_first = (
+            plan_action in staged_actions
+            and ticket.workflow_run.status != WorkflowStatus.REPROCESSED
+        )
+        if needs_reprocess_first:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This ticket must reach 'Reprocessed' before it can be resolved. "
+                    f"Current stage: {ticket.workflow_run.status.value}."
+                ),
+            )
         known_ids = {item.attachment_id for item in ticket.attachments}
         missing = [item for item in request.attachment_ids if item not in known_ids]
         if missing:

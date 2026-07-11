@@ -22,11 +22,39 @@ export const RESOLUTION_BENCHMARK_DAYS = 3;
 
 export const WORKFLOW_STATUS_LABELS: Record<string, string> = {
   needs_approval: "Approval required",
+  needs_mapping: "Awaiting mapping",
+  approved: "Approved — queued",
+  mapping_maintained: "Mapping maintained — queued",
+  ready_for_reprocessing: "Ready for reprocessing",
   blocked: "Policy blocked",
   reprocessed: "Reprocessed",
   diagnosed: "Diagnosed",
   new: "New"
 };
+
+// Ordered pipeline steps for the two staged remediation paths. A ticket's
+// current stage is looked up by workflow_run.status to highlight progress.
+export const MASTER_DATA_PIPELINE_STEPS = [
+  { key: "needs_approval", label: "Needs Approval" },
+  { key: "approved", label: "Approved" },
+  { key: "ready_for_reprocessing", label: "Ready for Reprocessing" },
+  { key: "reprocessed", label: "Reprocessed" }
+] as const;
+
+export const MAPPING_PIPELINE_STEPS = [
+  { key: "needs_mapping", label: "Needs Mapping" },
+  { key: "mapping_maintained", label: "Mapping Maintained" },
+  { key: "ready_for_reprocessing", label: "Ready for Reprocessing" },
+  { key: "reprocessed", label: "Reprocessed" }
+] as const;
+
+// Workflow statuses that will advance on their own (background job) without
+// further operator action — used to drive polling in the ticket detail view.
+export const TRANSITIONAL_WORKFLOW_STATUSES = new Set([
+  "approved",
+  "mapping_maintained",
+  "ready_for_reprocessing"
+]);
 
 export function humanize(value: string): string {
   return value

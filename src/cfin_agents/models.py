@@ -52,6 +52,15 @@ class WorkflowStatus(StrEnum):
     NEEDS_APPROVAL = "needs_approval"
     BLOCKED = "blocked"
     REPROCESSED = "reprocessed"
+    # Workbench-only staged states for the human-in-the-loop pipeline. These are
+    # never produced by DeterministicWorkflow.run() (which always resolves a
+    # scenario to a final status in one deterministic pass) — they exist purely
+    # as ticket-presentation states, assigned and advanced by the API layer to
+    # simulate the real-world lag between approval/mapping and reprocessing.
+    NEEDS_MAPPING = "needs_mapping"
+    APPROVED = "approved"
+    MAPPING_MAINTAINED = "mapping_maintained"
+    READY_FOR_REPROCESSING = "ready_for_reprocessing"
 
 
 class ActionType(StrEnum):
