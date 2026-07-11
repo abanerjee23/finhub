@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
-from cfin_agents.models import ReasonCode
+from cfin_agents.models import ReasonCode, WorkflowStatus
 from cfin_agents.ticket_models import (
+    AgingBucket,
     OperatorStatus,
     OwnerRole,
     StagedFailureRecord,
@@ -15,6 +16,12 @@ from cfin_agents.ticket_models import (
     TicketStatus,
 )
 from cfin_agents.ticket_narratives import build_ticket_narratives, format_ticket_description
+from cfin_agents.timeutil import utc_now
+
+# Fixed demo FX rates for aggregating mixed-currency synthetic documents.
+FX_RATES_TO_USD: dict[str, float] = {"USD": 1.0, "EUR": 1.08, "BRL": 0.18}
+
+AGING_BUCKET_LABELS: tuple[str, ...] = ("0-1d", "1-3d", "3-7d", "7d+")
 
 TICKET_STAGES: tuple[TicketStatus, ...] = (
     TicketStatus.RECEIVED,
@@ -77,7 +84,7 @@ def create_ticket(record: StagedFailureRecord, workflow_run) -> Ticket:
     owner_role, tagged_roles, policy_owner = role_routing_for_reason(
         workflow_run.diagnosis.reason_code
     )
-    now = datetime.utcnow()
+    now = utc_now()
     operator_status = OperatorStatus.ASSIGNED
     stage_durations = _fresh_stage_durations()
     timeline = _timeline_for_ticket(record, workflow_run, operator_status, now, owner_role)
@@ -144,13 +151,37 @@ def dashboard_summary(tickets: list[Ticket]) -> TicketDashboardSummary:
         else 0.0
     )
 
+    now = utc_now()
+    open_tickets = [
+        ticket for ticket in tickets if ticket.operator_status != OperatorStatus.RESOLVED
+    ]
+
+    open_value_by_company: dict[str, float] = defaultdict(float)
+    open_value_by_source: dict[str, float] = defaultdict(float)
+    value_by_currency: dict[str, float] = defaultdict(float)
+    aging = {label: AgingBucket() for label in AGING_BUCKET_LABELS}
+    sla_breached_count = 0
+    sla_breached_value = 0.0
+
+    for ticket in tickets:
+        value_by_currency[ticket.currency] += ticket.amount
+
+    for ticket in open_tickets:
+        usd = usd_equivalent(ticket.amount, ticket.currency)
+        open_value_by_company[ticket.company_code] += usd
+        open_value_by_source[ticket.source_system] += usd
+        bucket = aging[_aging_bucket_label((now - ticket.created_at).total_seconds() / 86400)]
+        bucket.count += 1
+        bucket.value_usd = round(bucket.value_usd + usd, 2)
+        if ticket.sla_due_at < now:
+            sla_breached_count += 1
+            sla_breached_value += usd
+
+    reprocessed_count = workflow_counts.get(WorkflowStatus.REPROCESSED.value, 0)
+
     return TicketDashboardSummary(
         total_tickets=len(tickets),
-        open_tickets=sum(
-            1
-            for ticket in tickets
-            if ticket.operator_status != OperatorStatus.RESOLVED
-        ),
+        open_tickets=len(open_tickets),
         closed_tickets=len(resolved),
         average_resolution_days=round(avg_resolution, 1),
         slowest_stage=slowest_stage,
@@ -159,7 +190,41 @@ def dashboard_summary(tickets: list[Ticket]) -> TicketDashboardSummary:
         tickets_by_reason_code=dict(reason_counts),
         workflow_status_counts=dict(workflow_counts),
         average_stage_days=average_stage_days,
+        total_value_usd=round(
+            sum(usd_equivalent(ticket.amount, ticket.currency) for ticket in tickets), 2
+        ),
+        open_value_usd=round(
+            sum(usd_equivalent(ticket.amount, ticket.currency) for ticket in open_tickets), 2
+        ),
+        open_value_by_company_code={
+            code: round(value, 2) for code, value in sorted(open_value_by_company.items())
+        },
+        open_value_by_source_system={
+            system: round(value, 2) for system, value in sorted(open_value_by_source.items())
+        },
+        value_by_currency={
+            currency: round(value, 2) for currency, value in sorted(value_by_currency.items())
+        },
+        sla_breached_count=sla_breached_count,
+        sla_breached_value_usd=round(sla_breached_value, 2),
+        aging_buckets=aging,
+        automation_rate=round(reprocessed_count / len(tickets), 3) if tickets else 0.0,
+        fx_rates_to_usd=FX_RATES_TO_USD,
     )
+
+
+def usd_equivalent(amount: float, currency: str) -> float:
+    return amount * FX_RATES_TO_USD.get(currency, 1.0)
+
+
+def _aging_bucket_label(age_days: float) -> str:
+    if age_days < 1:
+        return "0-1d"
+    if age_days < 3:
+        return "1-3d"
+    if age_days < 7:
+        return "3-7d"
+    return "7d+"
 
 
 def _priority_for_amount(amount: float) -> TicketPriority:

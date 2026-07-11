@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from cfin_agents.timeutil import UTCDateTime, utc_now
 
 
 class FailureScenario(StrEnum):
@@ -130,7 +131,7 @@ class GovernanceDecision(BaseModel):
 
 
 class AuditEvent(BaseModel):
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: UTCDateTime = Field(default_factory=utc_now)
     actor: str
     action: str
     details: dict[str, Any] = Field(default_factory=dict)
@@ -154,6 +155,10 @@ class WorkflowRun(BaseModel):
     audit_events: list[AuditEvent] = Field(default_factory=list)
     agent_summary: str | None = None
     langfuse_trace_id: str | None = None
+    # Shadow-mode output from the LLM manager agent (informational only; the
+    # deterministic controller remains authoritative for all state).
+    agent_final_output: str | None = None
+    shadow_agreement: bool | None = None
 
     def promptfoo_summary(self) -> dict[str, Any]:
         return {

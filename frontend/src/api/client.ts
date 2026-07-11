@@ -9,6 +9,9 @@ export type TicketListItem = {
   title: string;
   description: string;
   company_code: string;
+  amount: number;
+  currency: string;
+  amount_usd: number;
   priority: string;
   operator_status: string;
   reason_code: string;
@@ -25,6 +28,11 @@ export type TicketListItem = {
   sla_due_at: string;
 };
 
+export type AgingBucket = {
+  count: number;
+  value_usd: number;
+};
+
 export type DashboardSummary = {
   total_tickets: number;
   open_tickets: number;
@@ -36,6 +44,23 @@ export type DashboardSummary = {
   tickets_by_reason_code: Record<string, number>;
   workflow_status_counts: Record<string, number>;
   average_stage_days: Record<string, number>;
+  total_value_usd: number;
+  open_value_usd: number;
+  open_value_by_company_code: Record<string, number>;
+  open_value_by_source_system: Record<string, number>;
+  value_by_currency: Record<string, number>;
+  sla_breached_count: number;
+  sla_breached_value_usd: number;
+  aging_buckets: Record<string, AgingBucket>;
+  automation_rate: number;
+  fx_rates_to_usd: Record<string, number>;
+};
+
+export type SummaryFeedback = {
+  rating: "up" | "down";
+  actor: string;
+  note: string;
+  created_at: string;
 };
 
 export type TicketComment = {
@@ -66,8 +91,13 @@ export type TicketDetail = TicketListItem & {
   langfuse_trace_url?: string | null;
   current_stage_started_at: string;
   created_at: string;
+  summary_feedback?: SummaryFeedback | null;
   workflow_run: {
+    status: string;
+    execution_mode: string;
     langfuse_trace_id?: string | null;
+    agent_final_output?: string | null;
+    shadow_agreement?: boolean | null;
     diagnosis: {
       root_cause: string;
       evidence: string[];
@@ -85,6 +115,11 @@ export type TicketDetail = TicketListItem & {
       policy_reasons: string[];
       audit_reason: string;
     };
+    reprocess_result?: {
+      success: boolean;
+      message: string;
+      target_document_id?: string | null;
+    } | null;
   };
   timeline: Array<{
     timestamp: string;
@@ -218,6 +253,14 @@ export type WorkbenchSweepResult = {
   dashboard: DashboardSummary;
 };
 
+export type SweepJob = Partial<WorkbenchSweepResult> & {
+  job_id: string;
+  status: "running" | "completed" | "failed";
+  processed: number;
+  total: number;
+  error?: string;
+};
+
 export function getWorkbenchStatus(): Promise<WorkbenchStatus> {
   return request("/api/workbench/status");
 }
@@ -230,10 +273,75 @@ export function clearWorkbench(): Promise<WorkbenchStatus & { dashboard: Dashboa
   return request("/api/workbench/clear", { method: "POST" });
 }
 
-export function sweepWorkbench(batchSize = 5): Promise<WorkbenchSweepResult> {
+export function startSweepJob(batchSize = 5): Promise<SweepJob> {
   return request("/api/workbench/sweep", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ batch_size: batchSize })
+  });
+}
+
+export function getSweepJob(jobId: string): Promise<SweepJob> {
+  return request(`/api/workbench/sweep/jobs/${encodeURIComponent(jobId)}`);
+}
+
+export type AssigneeOption = { name: string; role: string };
+
+export function getAssignees(): Promise<{ assignees: AssigneeOption[] }> {
+  return request("/api/workbench/assignees");
+}
+
+export function approveTicket(
+  ticketId: string,
+  options?: { actor?: string; note?: string }
+): Promise<TicketDetail> {
+  return request(`/api/tickets/${ticketId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: options?.actor ?? "Workbench User",
+      note: options?.note?.trim() || undefined
+    })
+  });
+}
+
+export function maintainTicketMapping(
+  ticketId: string,
+  targetValue: string,
+  options?: { sourceValue?: string; actor?: string; note?: string }
+): Promise<TicketDetail> {
+  return request(`/api/tickets/${ticketId}/maintain-mapping`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_value: targetValue,
+      source_value: options?.sourceValue?.trim() || undefined,
+      actor: options?.actor ?? "Workbench User",
+      note: options?.note?.trim() || undefined
+    })
+  });
+}
+
+export function updateTicketAssignee(
+  ticketId: string,
+  assignee: string,
+  actor = "Workbench User"
+): Promise<TicketDetail> {
+  return request(`/api/tickets/${ticketId}/assignee`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assignee, actor })
+  });
+}
+
+export function postSummaryFeedback(
+  ticketId: string,
+  rating: "up" | "down",
+  note?: string
+): Promise<TicketDetail> {
+  return request(`/api/tickets/${ticketId}/summary-feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rating, note: note?.trim() || undefined })
   });
 }

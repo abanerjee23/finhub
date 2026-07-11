@@ -3,8 +3,8 @@
 > **Your personal reference for this project's eval work.**  
 > Session log, status, decisions, commands, and a ground-up eval concepts guide. Updated at the end of each eval session.
 
-**Last updated:** 2026-06-28  
-**Current phase:** Live on Railway — workbench deployed with Docker, volume, Langfuse  
+**Last updated:** 2026-07-11  
+**Current phase:** Human-in-the-loop actions + business-value dashboard live; feedback/shadow logs collecting  
 **Starter docs:** DOC-1001 … DOC-1010 (full golden set)
 
 ---
@@ -53,6 +53,11 @@
 | Architecture docs | ✅ Done | `docs/ARCHITECTURE.md` |
 | Workbench UI (self-contained demo) | ✅ Done | Reset/seed/sweep in UI; `operator_status` model |
 | Runtime persistence | ✅ Done | `FINHUB_DATA_DIR`, SQLite, local/S3 attachments |
+| Human-in-the-loop actions in UI | ✅ Done | Approve & reprocess + maintain mapping close the loop in the workbench |
+| Business-value dashboard | ✅ Done | Value at risk, SLA breaches, aging, automation rate (USD-eq demo FX) |
+| Summary feedback loop | ✅ Done | 👍/👎 → `summary_feedback.jsonl`; future golden-set candidates |
+| Shadow-mode agreement logging | 🟡 Collecting | `agent_shadow_log.jsonl` on LLM-path runs; report rate once volume exists |
+| Confidence-threshold routing | ✅ Done | `CONFIDENCE_REVIEW_THRESHOLD` in PolicyEngine (default keeps evals green) |
 
 ---
 
@@ -266,6 +271,38 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 ---
 
 ## Session log
+
+### 2026-07-11 — Human-in-the-loop actions, business metrics, feedback + shadow-mode logging
+
+**Focus:** Close the approval loop in the UI, business-value dashboard, and two new eval feedback signals.
+
+**Delivered:**
+
+- **Approve & Reprocess** and **Maintain Mapping** actions in the workbench — `needs_approval`
+  and `MP_*` tickets now resolve end-to-end in the UI (`POST /api/tickets/{id}/approve`,
+  `POST /api/tickets/{id}/maintain-mapping`), with audit timeline events
+- **Business Impact panel**: open value at risk / total value failed (USD-equivalent, fixed demo
+  FX with per-currency raw sums), open value by company code and source system (click-to-filter),
+  SLA breach count/value, aging buckets, automation rate
+- **Summary feedback loop**: 👍/👎 on `agent_summary` in ticket detail →
+  `{FINHUB_DATA_DIR}/summary_feedback.jsonl` (rating, note, reason code, summary text) — future
+  eval-set candidates
+- **Shadow-mode agreement logging**: the LLM manager agent's final output is now captured on
+  `WorkflowRun.agent_final_output` with a keyword-cue `shadow_agreement` flag, appended to
+  `{FINHUB_DATA_DIR}/agent_shadow_log.jsonl` — evidence base for ever letting agents act directly
+- **Confidence-threshold routing**: `CONFIDENCE_REVIEW_THRESHOLD` (default 0.5) in `PolicyEngine`
+  forces `needs_approval` below threshold; default keeps all deterministic evals green (classifier
+  emits 0.8–0.95); covered by unit tests
+- Reliability: per-ticket SQLite writes (no more full-table rewrites on mutations), async sweep
+  job with progress polling (`GET /api/workbench/sweep/jobs/{id}`), timezone-aware datetimes
+- Frontend refactored from a single 1,519-line `App.tsx` into components; bulk status moves,
+  assignee reassignment, execution-mode badge
+- Deterministic evals 12/12; pytest 62 passed (7 new workbench API tests + 2 confidence tests)
+
+**Next:** Feed `summary_feedback.jsonl` disagreements into `summary_cases.yaml` expansion; report
+shadow-agreement rate once enough LLM-path runs accumulate.
+
+---
 
 ### 2026-06-28 — Railway live deploy
 

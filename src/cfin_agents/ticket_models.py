@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
 from cfin_agents.models import FinancialDocument, WorkflowRun
+from cfin_agents.timeutil import UTCDateTime
 
 
 class StagingRecordStatus(StrEnum):
@@ -60,7 +60,7 @@ class ErrorLog(BaseModel):
     source_system: str
     error_code: str
     error_text: str
-    created_at: datetime
+    created_at: UTCDateTime
     component: str = "SAP CFIN AIF"
 
 
@@ -69,13 +69,13 @@ class StagedFailureRecord(BaseModel):
     document: FinancialDocument
     error_logs: list[ErrorLog]
     status: StagingRecordStatus = StagingRecordStatus.NEW
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
     source_queue: str = "synthetic_cfin_aif_staging"
 
 
 class TicketEvent(BaseModel):
-    timestamp: datetime
+    timestamp: UTCDateTime
     actor: str
     action: str
     from_status: TicketStatus | None = None
@@ -88,7 +88,7 @@ class TicketComment(BaseModel):
     comment_id: str
     author: str
     text: str
-    created_at: datetime
+    created_at: UTCDateTime
 
 
 class TicketAttachment(BaseModel):
@@ -96,9 +96,16 @@ class TicketAttachment(BaseModel):
     filename: str
     content_type: str
     size_bytes: int
-    uploaded_at: datetime
+    uploaded_at: UTCDateTime
     uploaded_by: str
     purpose: str = "resolution_proof"
+
+
+class SummaryFeedback(BaseModel):
+    rating: str  # "up" | "down"
+    actor: str
+    note: str = ""
+    created_at: UTCDateTime
 
 
 class Ticket(BaseModel):
@@ -123,20 +130,26 @@ class Ticket(BaseModel):
     tagged_roles: list[OwnerRole]
     policy_owner: OwnerRole
     assignee: str
-    current_stage_started_at: datetime
-    created_at: datetime
-    updated_at: datetime
-    sla_due_at: datetime
+    current_stage_started_at: UTCDateTime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
+    sla_due_at: UTCDateTime
     stage_durations_days: dict[str, float]
     workflow_run: WorkflowRun
     timeline: list[TicketEvent] = Field(default_factory=list)
     comments: list[TicketComment] = Field(default_factory=list)
     attachments: list[TicketAttachment] = Field(default_factory=list)
+    summary_feedback: SummaryFeedback | None = None
 
     @computed_field
     @property
     def days_open(self) -> float:
         return round((self.updated_at - self.created_at).total_seconds() / 86400, 1)
+
+
+class AgingBucket(BaseModel):
+    count: int = 0
+    value_usd: float = 0.0
 
 
 class TicketDashboardSummary(BaseModel):
@@ -150,3 +163,15 @@ class TicketDashboardSummary(BaseModel):
     tickets_by_reason_code: dict[str, int]
     workflow_status_counts: dict[str, int]
     average_stage_days: dict[str, float]
+    # Business-value metrics. USD figures use fixed demo FX rates (fx_rates_to_usd)
+    # so mixed-currency documents can be aggregated; raw sums stay in value_by_currency.
+    total_value_usd: float = 0.0
+    open_value_usd: float = 0.0
+    open_value_by_company_code: dict[str, float] = Field(default_factory=dict)
+    open_value_by_source_system: dict[str, float] = Field(default_factory=dict)
+    value_by_currency: dict[str, float] = Field(default_factory=dict)
+    sla_breached_count: int = 0
+    sla_breached_value_usd: float = 0.0
+    aging_buckets: dict[str, AgingBucket] = Field(default_factory=dict)
+    automation_rate: float = 0.0
+    fx_rates_to_usd: dict[str, float] = Field(default_factory=dict)

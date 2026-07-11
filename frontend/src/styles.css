@@ -1233,3 +1233,307 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Business impact panel --- */
+
+.business-impact-panel {
+  margin-top: 1rem;
+  padding: 1.5rem;
+}
+
+.impact-cards {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-bottom: 1rem;
+}
+
+.impact-cards .metric-card {
+  box-shadow: none;
+}
+
+.metric-hint {
+  color: #647188;
+  display: block;
+  font-size: 0.78rem;
+  margin-top: 0.35rem;
+}
+
+.impact-breakdowns {
+  display: grid;
+  gap: 0 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.impact-breakdowns .breakdown {
+  border-top: 1px solid #eef1f8;
+}
+
+.bar-row-button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 400;
+  padding: 0.25rem 0.35rem;
+  text-align: left;
+  width: 100%;
+}
+
+.bar-row-button:hover {
+  background: #f0f4fd;
+}
+
+.bar-row-button.bar-row-active {
+  background: #e5edfd;
+  box-shadow: inset 0 0 0 1px #b8ccf7;
+}
+
+.aging-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1rem;
+}
+
+.aging-card {
+  background: #f7f9fe;
+  border: 1px solid #e3e9f5;
+  border-radius: 12px;
+  padding: 0.6rem 0.7rem;
+  text-align: center;
+}
+
+.aging-card span {
+  color: #647188;
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.aging-card strong {
+  display: block;
+  font-size: 1.15rem;
+}
+
+.aging-card small {
+  color: #647188;
+  font-size: 0.75rem;
+}
+
+.currency-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.currency-chip {
+  background: #eef2fb;
+  border-radius: 999px;
+  color: #34456b;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.35rem 0.75rem;
+}
+
+.impact-footnote {
+  color: #8794aa;
+  font-size: 0.78rem;
+  margin: 1rem 0 0;
+}
+
+/* --- Sweep progress --- */
+
+.sweep-progress {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.sweep-progress span {
+  color: #546179;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.sweep-progress-track {
+  background: #e9eefb;
+  border-radius: 999px;
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+}
+
+.sweep-progress-fill {
+  background: #2458d3;
+  border-radius: 999px;
+  height: 100%;
+  transition: width 0.4s ease;
+}
+
+/* --- Workflow actions (approve / maintain mapping) --- */
+
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+/* --- Summary feedback --- */
+
+.summary-feedback {
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+}
+
+.summary-feedback span {
+  font-size: 0.82rem;
+  opacity: 0.85;
+}
+
+.summary-feedback small {
+  font-size: 0.78rem;
+  opacity: 0.75;
+}
+
+.feedback-button {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.4rem 0.55rem;
+}
+
+.feedback-button:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.feedback-button.feedback-active {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+/* --- Shadow-mode agent output --- */
+
+.shadow-output {
+  margin-top: 0.9rem;
+}
+
+.shadow-toggle {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.35rem 0.65rem;
+}
+
+.shadow-text {
+  font-size: 0.85rem;
+  margin: 0.6rem 0 0;
+  opacity: 0.9;
+  white-space: pre-wrap;
+}
+
+.execution-badge {
+  text-transform: none;
+}
+
+/* --- Assignee select --- */
+
+.assignee-select {
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  max-width: 100%;
+  padding: 0.35rem 0.5rem;
+}
+
+/* --- Bulk actions + table extras --- */
+
+.bulk-bar {
+  align-items: center;
+  background: #eef3fd;
+  border: 1px solid #cfdcf9;
+  border-radius: 12px;
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.85rem;
+}
+
+.bulk-bar span {
+  color: #34456b;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.bulk-bar select {
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+}
+
+.bulk-bar button {
+  padding: 0.5rem 0.85rem;
+}
+
+.check-cell {
+  width: 2rem;
+}
+
+.check-cell input {
+  cursor: pointer;
+  height: 1rem;
+  width: 1rem;
+}
+
+.value-cell {
+  white-space: nowrap;
+}
+
+/* --- Filter chips --- */
+
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter-chip {
+  background: #e5edfd;
+  border-radius: 999px;
+  color: #2458d3;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.35rem 0.8rem;
+}
+
+.filter-chip:hover {
+  background: #d5e2fb;
+}
+
+/* --- Modal input --- */
+
+.modal-input {
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  font: inherit;
+  margin-bottom: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  width: 100%;
+}

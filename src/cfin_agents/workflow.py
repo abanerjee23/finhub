@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from typing import Any
 
 from dotenv import load_dotenv
 
-from cfin_agents.models import WorkflowRun
+from cfin_agents.models import WorkflowRun, WorkflowStatus
 from cfin_agents.observability import configure_openai_agents_tracing, workflow_observation
+from cfin_agents.paths import runtime_data_dir
 from cfin_agents.repository import SyntheticRepository
 from cfin_agents.services import ApprovalStore, DeterministicWorkflow
+from cfin_agents.timeutil import utc_now
 from cfin_agents.toolkit import FinanceToolset
 
 load_dotenv()
@@ -176,15 +179,61 @@ class AgenticWorkflow:
             f"Human approval already recorded: {approve}. "
             "Respect deterministic tool outputs as the source of truth."
         )
-        await Runner.run(manager, prompt)
+        agent_final_output: str | None = None
+        try:
+            agent_result = await Runner.run(manager, prompt)
+            if agent_result.final_output is not None:
+                agent_final_output = str(agent_result.final_output)
+        except Exception:
+            agent_final_output = None
 
         # The deterministic controller is the authoritative final state, even when agents run.
         # agent_summary comes from generate_analyst_summary() (SUMMARY_MODEL, default gpt-4o).
-        return self.deterministic.run(
+        run = self.deterministic.run(
             document_id=document_id,
             approve=False,
             execution_mode="openai_agents_sdk_guarded",
         )
+        run.agent_final_output = agent_final_output
+        run.shadow_agreement = _shadow_agreement(run.status, agent_final_output)
+        _log_shadow_record(run)
+        return run
+
+
+# Keyword cues per deterministic status, used to score whether the shadow-mode
+# agent narrative agrees with the authoritative outcome.
+_SHADOW_STATUS_CUES: dict[WorkflowStatus, tuple[str, ...]] = {
+    WorkflowStatus.REPROCESSED: ("reprocess", "posted", "resolved"),
+    WorkflowStatus.NEEDS_APPROVAL: ("approval", "approve", "sign-off"),
+    WorkflowStatus.BLOCKED: ("block", "closed period", "cannot", "not allowed"),
+    WorkflowStatus.DIAGNOSED: ("diagnos",),
+    WorkflowStatus.NEW: (),
+}
+
+
+def _shadow_agreement(status: WorkflowStatus, agent_output: str | None) -> bool | None:
+    if not agent_output:
+        return None
+    lowered = agent_output.lower()
+    cues = _SHADOW_STATUS_CUES.get(status, ())
+    return any(cue in lowered for cue in cues)
+
+
+def _log_shadow_record(run: WorkflowRun) -> None:
+    """Append a shadow-mode comparison record for offline eval analysis."""
+    try:
+        log_path = runtime_data_dir() / "agent_shadow_log.jsonl"
+        record = {
+            "timestamp": utc_now().isoformat(),
+            "document_id": run.document_id,
+            "deterministic_status": run.status.value,
+            "shadow_agreement": run.shadow_agreement,
+            "agent_final_output": run.agent_final_output,
+        }
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
 
 
 def run_document_workflow(

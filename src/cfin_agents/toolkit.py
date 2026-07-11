@@ -62,14 +62,14 @@ class FinanceToolset:
         document = self.workflow.repository.get_document(document_id)
         diagnosis = self.workflow.diagnosis_service.diagnose(document)
         plan = self.workflow.planner.plan(document, diagnosis)
-        decision = self.workflow.policy.evaluate(document, plan)
+        decision = self.workflow.policy.evaluate(document, plan, diagnosis)
         return decision.model_dump(mode="json")
 
     def controlled_reprocess(self, document_id: str) -> dict[str, Any]:
         document = self.workflow.repository.get_document(document_id)
         diagnosis = self.workflow.diagnosis_service.diagnose(document)
         plan = self.workflow.planner.plan(document, diagnosis)
-        decision = self.workflow.policy.evaluate(document, plan)
+        decision = self.workflow.policy.evaluate(document, plan, diagnosis)
         result = self.workflow.reprocessor.execute(document, plan, decision)
         return result.model_dump(mode="json")
 

@@ -257,3 +257,43 @@ def test_diagnosis_failure_scenario_matches_document_metadata() -> None:
         document = repository.get_document(document_id)
         diagnosis = diagnosis_service.diagnose(document)
         assert diagnosis.failure_scenario == document.failure_scenario
+
+
+def test_low_confidence_diagnosis_routes_to_human_review(monkeypatch) -> None:
+    """Below CONFIDENCE_REVIEW_THRESHOLD, governance forces needs_approval."""
+    repository = SyntheticRepository()
+    diagnosis_service = DiagnosisService(Validator(repository))
+    planner = RemediationPlanner()
+    policy = PolicyEngine(ApprovalStore())
+
+    document = repository.get_document("DOC-1002")
+    diagnosis = diagnosis_service.diagnose(document)
+    plan = planner.plan(document, diagnosis)
+
+    # Default threshold (0.5) does not trip on classifier confidences (0.8-0.95).
+    decision = policy.evaluate(document, plan, diagnosis)
+    assert decision.allowed is True
+
+    # A tightened threshold routes the same diagnosis to human review.
+    monkeypatch.setenv("CONFIDENCE_REVIEW_THRESHOLD", "0.99")
+    decision = policy.evaluate(document, plan, diagnosis)
+    assert decision.allowed is False
+    assert decision.status == WorkflowStatus.NEEDS_APPROVAL
+    assert any("confidence" in reason.lower() for reason in decision.policy_reasons)
+
+
+def test_low_confidence_review_is_bypassed_after_approval(monkeypatch) -> None:
+    repository = SyntheticRepository()
+    diagnosis_service = DiagnosisService(Validator(repository))
+    planner = RemediationPlanner()
+    approvals = ApprovalStore()
+    policy = PolicyEngine(approvals)
+
+    document = repository.get_document("DOC-1002")
+    diagnosis = diagnosis_service.diagnose(document)
+    plan = planner.plan(document, diagnosis)
+
+    monkeypatch.setenv("CONFIDENCE_REVIEW_THRESHOLD", "0.99")
+    approvals.approve(document.document_id)
+    decision = policy.evaluate(document, plan, diagnosis)
+    assert decision.allowed is True

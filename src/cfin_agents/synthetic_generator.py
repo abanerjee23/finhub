@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from cfin_agents.models import FailureScenario, FinancialDocument
 from cfin_agents.repository import SyntheticRepository
 from cfin_agents.ticket_models import ErrorLog, StagedFailureRecord, StagingRecordStatus
+from cfin_agents.timeutil import utc_now
 
 SCENARIO_WEIGHTS: dict[FailureScenario, int] = {
     FailureScenario.COST_CENTER_SOURCE_MAPPING_MISSING: 18,
@@ -52,7 +53,7 @@ def generate_staged_failures(
     documents_by_scenario = {document.failure_scenario: document for document in seed_documents}
     scenarios = list(SCENARIO_WEIGHTS)
     weights = [SCENARIO_WEIGHTS[scenario] for scenario in scenarios]
-    base_time = created_at or datetime.utcnow()
+    base_time = created_at or utc_now()
 
     records: list[StagedFailureRecord] = []
     for offset in range(count):

@@ -139,15 +139,21 @@ Implementation: `document_store.py`, `attachment_store.py`, `paths.py`, `seed_qu
 | GET | `/api/workbench/status` | Ticket/staging counts, `summary_source`, Langfuse status |
 | POST | `/api/workbench/reset?count=&seed=` | Clear + reseed staging queue (count 1–500) |
 | POST | `/api/workbench/clear` | Clear tickets/staging without reseed |
-| POST | `/api/workbench/sweep` | Process batch from staging → agentic tickets |
+| POST | `/api/workbench/sweep` | Start background sweep job → `{job_id}` (`"wait": true` runs synchronously) |
+| GET | `/api/workbench/sweep/jobs/{job_id}` | Poll sweep job progress/result |
+| GET | `/api/workbench/assignees` | Role → assignee options for reassignment |
 | GET | `/api/tickets` | Filterable list (`status` → `operator_status`, `owner_role`, `priority`, `reason_code`) |
 | GET | `/api/tickets/{id}` | Detail + narratives + `langfuse_trace_url` |
 | PATCH | `/api/tickets/{id}/description` | Edit ticket title/description |
+| PATCH | `/api/tickets/{id}/assignee` | Reassign owner (timeline `reassigned` event) |
 | POST | `/api/tickets/{id}/transition` | Update `operator_status` (blocked/resolved rules enforced) |
+| POST | `/api/tickets/{id}/approve` | Human approval for `needs_approval` tickets → governed reprocess → resolved |
+| POST | `/api/tickets/{id}/maintain-mapping` | `MP_*` tickets: record mapping entry → reprocess → resolved |
+| POST | `/api/tickets/{id}/summary-feedback` | 👍/👎 on `agent_summary` → `summary_feedback.jsonl` |
 | POST | `/api/tickets/{id}/comments` | Add comment |
 | POST | `/api/tickets/{id}/attachments` | Upload proof file |
 | GET | `/api/tickets/{id}/attachments/{attachment_id}` | Download/view attachment |
-| GET | `/api/dashboard/summary` | Analytics aggregates |
+| GET | `/api/dashboard/summary` | Analytics + business-value aggregates (USD-eq demo FX, SLA breaches, aging, automation rate) |
 | GET | `/api/dashboard/stage-matrix?limit=` | Per-ticket stage durations (API only; UI uses dashboard summary) |
 
 ### Legacy demo endpoints
@@ -176,17 +182,18 @@ Still present for scripting; the React workbench uses `/api/workbench/*` instead
 
 | Area | Description |
 |------|-------------|
-| **Workbench Controls** | Seed count, reset, sweep batch size, refresh |
+| **Workbench Controls** | Seed count, reset, sweep batch size, refresh, sweep progress bar (job polling) |
+| **Business Impact panel** | Value at risk / total value failed (USD-eq), by company code / source system (click-to-filter), SLA breaches, aging buckets, automation rate |
 | **Analytics panel** | KPIs, status breakdown, owner chart, stage times |
-| **Ticket detail** | Agent diagnosis hero, metadata, status, comments, attachments, activity log |
-| **Search Tickets** | Filters, sortable table, inline status dropdown |
+| **Ticket detail** | Agent diagnosis hero (execution badge, summary feedback, shadow note), approve & maintain-mapping actions, assignee select, metadata, status, comments, attachments, activity log |
+| **Search Tickets** | Filters + business-filter chips, sortable table, inline status dropdown, bulk status moves |
 
 Dev: Vite on `:5173` proxies `/api` → `:8000` (same-origin; no `VITE_API_BASE` needed).  
 Production: `frontend/dist` served by FastAPI on one port; API client defaults to same-origin `/api`.
 
 Optional: `VITE_API_BASE` overrides the API host (split deployment only).
 
-Key files: `frontend/src/App.tsx`, `frontend/src/api/client.ts`.
+Key files: `frontend/src/App.tsx` (orchestrator), `frontend/src/components/*` (panels, table, detail, dialogs), `frontend/src/lib/format.ts` (shared helpers), `frontend/src/api/client.ts`.
 
 ## Observability (Langfuse)
 

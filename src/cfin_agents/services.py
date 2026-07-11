@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
 from uuid import uuid4
 
 from cfin_agents.analyst_summary import (
@@ -25,6 +24,7 @@ from cfin_agents.models import (
 )
 from cfin_agents.observability import summary_generation_observation
 from cfin_agents.repository import SyntheticRepository
+from cfin_agents.timeutil import utc_now
 
 MASTER_DATA_OBJECT_LABELS: dict[FailureScenario, str] = {
     FailureScenario.MISSING_GL_ACCOUNT_MASTER: "GL account",
@@ -255,11 +255,42 @@ class PolicyEngine:
     def __init__(self, approval_store: ApprovalStore) -> None:
         self.approval_store = approval_store
 
-    def evaluate(self, document: FinancialDocument, plan: RemediationPlan) -> GovernanceDecision:
+    @staticmethod
+    def confidence_review_threshold() -> float:
+        """Diagnoses below this confidence are routed to human review.
+
+        Default 0.5 keeps deterministic eval outcomes unchanged (the classifier
+        emits 0.8-0.95); raise via CONFIDENCE_REVIEW_THRESHOLD to tighten.
+        """
+        try:
+            return float(os.getenv("CONFIDENCE_REVIEW_THRESHOLD", "0.5"))
+        except ValueError:
+            return 0.5
+
+    def evaluate(
+        self,
+        document: FinancialDocument,
+        plan: RemediationPlan,
+        diagnosis: Diagnosis | None = None,
+    ) -> GovernanceDecision:
         reasons: list[str] = []
         allowed = True
         requires_approval = plan.requires_approval
         status = WorkflowStatus.DIAGNOSED
+
+        threshold = self.confidence_review_threshold()
+        if (
+            diagnosis is not None
+            and diagnosis.confidence < threshold
+            and not self.approval_store.is_approved(document.document_id)
+        ):
+            allowed = False
+            requires_approval = True
+            status = WorkflowStatus.NEEDS_APPROVAL
+            reasons.append(
+                f"Diagnosis confidence {diagnosis.confidence:.2f} is below the "
+                f"review threshold {threshold:.2f}; human review required."
+            )
 
         if plan.action == ActionType.CREATE_TARGET_MASTER_DATA:
             requires_approval = True
@@ -315,7 +346,7 @@ class ReprocessingService:
                 message="Reprocessing skipped by governance policy.",
             )
 
-        target_document_id = f"CFIN-{datetime.utcnow():%Y%m%d}-{uuid4().hex[:8].upper()}"
+        target_document_id = f"CFIN-{utc_now():%Y%m%d}-{uuid4().hex[:8].upper()}"
         return ReprocessResult(
             document_id=document.document_id,
             success=True,
@@ -363,7 +394,7 @@ class DeterministicWorkflow:
             requires_approval=plan.requires_approval,
         )
 
-        decision = self.policy.evaluate(document, plan)
+        decision = self.policy.evaluate(document, plan, diagnosis)
         audit.record(
             "governance_agent",
             "policy_evaluated",

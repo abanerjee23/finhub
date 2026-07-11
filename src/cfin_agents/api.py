@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
-from datetime import datetime
+import threading
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -22,18 +23,22 @@ from cfin_agents.attachment_store import (
     save_attachment_bytes,
 )
 from cfin_agents.batch import (
+    StagedDocumentRepository,
     bootstrap_demo,
     bootstrap_golden_document,
     diagnose_new_records,
+    load_staging_records,
     load_tickets,
-    save_tickets,
 )
+from cfin_agents.models import WorkflowRun, WorkflowStatus
 from cfin_agents.observability import langfuse_status, langfuse_trace_url
 from cfin_agents.paths import attachment_backend_name, runtime_data_dir
 from cfin_agents.seed_queue import reset_workbench
+from cfin_agents.services import ApprovalStore
 from cfin_agents.sweep import sweep_agentic_batch
 from cfin_agents.ticket_models import (
     OperatorStatus,
+    SummaryFeedback,
     Ticket,
     TicketAttachment,
     TicketComment,
@@ -41,7 +46,14 @@ from cfin_agents.ticket_models import (
     TicketStatus,
 )
 from cfin_agents.ticket_narratives import enrich_ticket, ticket_title
-from cfin_agents.ticketing import TICKET_STAGES, dashboard_summary
+from cfin_agents.ticketing import (
+    ROLE_ASSIGNEES,
+    TICKET_STAGES,
+    dashboard_summary,
+    usd_equivalent,
+)
+from cfin_agents.timeutil import utc_now
+from cfin_agents.workflow import AgenticWorkflow
 
 load_dotenv()
 
@@ -84,8 +96,32 @@ class DescriptionUpdateRequest(BaseModel):
     description: str
 
 
+class ApproveRequest(BaseModel):
+    actor: str = "Workbench User"
+    note: str | None = None
+
+
+class MaintainMappingRequest(BaseModel):
+    target_value: str
+    source_value: str | None = None
+    actor: str = "Workbench User"
+    note: str | None = None
+
+
+class AssigneeUpdateRequest(BaseModel):
+    assignee: str
+    actor: str = "Workbench User"
+
+
+class SummaryFeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+    note: str | None = None
+    actor: str = "Workbench User"
+
+
 class WorkbenchSweepRequest(BaseModel):
     batch_size: int = Field(default=5, ge=1, le=25)
+    wait: bool = False
 
 
 @app.get("/api/health")
@@ -172,9 +208,11 @@ def workbench_clear() -> dict:
     }
 
 
-@app.post("/api/workbench/sweep")
-def workbench_sweep(request: WorkbenchSweepRequest) -> dict:
-    results = sweep_agentic_batch(batch_size=request.batch_size)
+_SWEEP_JOBS: dict[str, dict] = {}
+_SWEEP_JOBS_LOCK = threading.Lock()
+
+
+def _sweep_result_payload(results: list[dict]) -> dict:
     tickets = load_tickets()
     created = [row for row in results if row.get("ticket_id")]
     errors = [row for row in results if row.get("error")]
@@ -186,6 +224,69 @@ def workbench_sweep(request: WorkbenchSweepRequest) -> dict:
         "ticket_count": document_store.ticket_count(),
         "staging_counts": document_store.staging_counts(),
         "dashboard": dashboard_summary(tickets).model_dump(mode="json"),
+    }
+
+
+def _run_sweep_job(job_id: str, batch_size: int) -> None:
+    def on_progress(processed: int, total: int, last: dict) -> None:
+        with _SWEEP_JOBS_LOCK:
+            job = _SWEEP_JOBS.get(job_id)
+            if job is not None:
+                job["processed"] = processed
+                job["total"] = total
+                job["last_result"] = last
+
+    try:
+        results = sweep_agentic_batch(batch_size=batch_size, progress_callback=on_progress)
+        payload = _sweep_result_payload(results)
+        with _SWEEP_JOBS_LOCK:
+            _SWEEP_JOBS[job_id].update(status="completed", **payload)
+    except Exception as exc:
+        with _SWEEP_JOBS_LOCK:
+            _SWEEP_JOBS[job_id].update(status="failed", error=str(exc))
+
+
+@app.post("/api/workbench/sweep")
+def workbench_sweep(request: WorkbenchSweepRequest) -> dict:
+    if request.wait:
+        results = sweep_agentic_batch(batch_size=request.batch_size)
+        return {"status": "completed", **_sweep_result_payload(results)}
+
+    job_id = f"SWEEP-{uuid4().hex[:8].upper()}"
+    pending = document_store.staging_counts().get("new", 0)
+    job = {
+        "job_id": job_id,
+        "status": "running",
+        "processed": 0,
+        "total": min(request.batch_size, pending),
+        "batch_size": request.batch_size,
+        "started_at": utc_now().isoformat(),
+    }
+    with _SWEEP_JOBS_LOCK:
+        _SWEEP_JOBS[job_id] = job
+        snapshot = dict(job)
+    worker = threading.Thread(target=_run_sweep_job, args=(job_id, request.batch_size), daemon=True)
+    worker.start()
+    return snapshot
+
+
+@app.get("/api/workbench/sweep/jobs/{job_id}")
+def workbench_sweep_job(job_id: str) -> dict:
+    with _SWEEP_JOBS_LOCK:
+        job = _SWEEP_JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Unknown sweep job '{job_id}'")
+        return dict(job)
+
+
+@app.get("/api/workbench/assignees")
+def workbench_assignees() -> dict:
+    return {
+        "assignees": [
+            {"name": name, "role": role.value} for role, name in sorted(
+                ROLE_ASSIGNEES.items(), key=lambda item: item[1]
+            )
+        ]
     }
 
 
@@ -222,22 +323,17 @@ def add_ticket_comment(ticket_id: str, request: CommentRequest) -> Ticket:
     if not body:
         raise HTTPException(status_code=400, detail="Comment text cannot be empty.")
 
-    tickets = load_tickets()
-    for index, ticket in enumerate(tickets):
-        if ticket.ticket_id != ticket_id:
-            continue
-        comment = TicketComment(
+    ticket = _require_ticket(ticket_id)
+    ticket.comments.append(
+        TicketComment(
             comment_id=f"CMT-{uuid4().hex[:8].upper()}",
             author=request.author.strip() or "Workbench User",
             text=body,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
-        ticket.comments.append(comment)
-        tickets[index] = ticket
-        save_tickets(tickets)
-        return enrich_ticket(ticket)
-
-    raise HTTPException(status_code=404, detail=f"Unknown ticket_id '{ticket_id}'")
+    )
+    document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
 
 
 @app.patch("/api/tickets/{ticket_id}/description")
@@ -246,19 +342,224 @@ def update_ticket_description(ticket_id: str, request: DescriptionUpdateRequest)
     if not body:
         raise HTTPException(status_code=400, detail="Description cannot be empty.")
 
-    tickets = load_tickets()
-    for index, ticket in enumerate(tickets):
-        if ticket.ticket_id != ticket_id:
-            continue
-        now = datetime.utcnow()
-        ticket.title = body
-        ticket.title_edited = True
-        ticket.updated_at = now
-        tickets[index] = ticket
-        save_tickets(tickets)
+    ticket = _require_ticket(ticket_id)
+    ticket.title = body
+    ticket.title_edited = True
+    ticket.updated_at = utc_now()
+    document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
+
+
+@app.patch("/api/tickets/{ticket_id}/assignee")
+def update_ticket_assignee(ticket_id: str, request: AssigneeUpdateRequest) -> Ticket:
+    assignee = request.assignee.strip()
+    if not assignee:
+        raise HTTPException(status_code=400, detail="Assignee cannot be empty.")
+
+    ticket = _require_ticket(ticket_id)
+    previous = ticket.assignee
+    if previous == assignee:
         return enrich_ticket(ticket)
 
-    raise HTTPException(status_code=404, detail=f"Unknown ticket_id '{ticket_id}'")
+    now = utc_now()
+    ticket.assignee = assignee
+    ticket.updated_at = now
+    ticket.timeline.append(
+        TicketEvent(
+            timestamp=now,
+            actor=request.actor.strip() or "Workbench User",
+            action="reassigned",
+            details={"from_assignee": previous, "to_assignee": assignee},
+            summary=f"Ticket reassigned from {previous} to {assignee}.",
+        )
+    )
+    document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
+
+
+@app.post("/api/tickets/{ticket_id}/summary-feedback")
+def submit_summary_feedback(ticket_id: str, request: SummaryFeedbackRequest) -> Ticket:
+    ticket = _require_ticket(ticket_id)
+    now = utc_now()
+    actor = request.actor.strip() or "Workbench User"
+    note = (request.note or "").strip()
+    ticket.summary_feedback = SummaryFeedback(
+        rating=request.rating,
+        actor=actor,
+        note=note,
+        created_at=now,
+    )
+    document_store.upsert_ticket(ticket)
+    _append_feedback_log(
+        {
+            "timestamp": now.isoformat(),
+            "ticket_id": ticket.ticket_id,
+            "document_id": ticket.document_id,
+            "reason_code": ticket.reason_code,
+            "rating": request.rating,
+            "note": note,
+            "actor": actor,
+            "agent_summary": ticket.agent_summary,
+        }
+    )
+    return enrich_ticket(ticket)
+
+
+@app.post("/api/tickets/{ticket_id}/approve")
+def approve_ticket(ticket_id: str, request: ApproveRequest) -> Ticket:
+    ticket = _require_ticket(ticket_id)
+    if ticket.workflow_run.status != WorkflowStatus.NEEDS_APPROVAL:
+        raise HTTPException(
+            status_code=400,
+            detail="Only tickets awaiting approval can be approved.",
+        )
+
+    run = _rerun_ticket_workflow(ticket, approve=True)
+    now = utc_now()
+    actor = request.actor.strip() or "Workbench User"
+    note = (request.note or "").strip()
+
+    ticket.workflow_run = run
+    if run.agent_summary:
+        ticket.agent_summary = run.agent_summary
+    ticket.timeline.append(
+        TicketEvent(
+            timestamp=now,
+            actor=actor,
+            action="approval_recorded",
+            details={"note": note},
+            summary="Master data creation approved by a human reviewer.",
+        )
+    )
+
+    reprocessed = bool(run.reprocess_result and run.reprocess_result.success)
+    if reprocessed:
+        target_id = run.reprocess_result.target_document_id
+        previous_status = ticket.operator_status
+        ticket.operator_status = OperatorStatus.RESOLVED
+        ticket.timeline.append(
+            TicketEvent(
+                timestamp=now,
+                actor="reprocessing_controller",
+                action="reprocess_completed",
+                from_status=_operator_as_journey(previous_status),
+                to_status=TicketStatus.RESOLVED,
+                details={"target_document_id": target_id},
+                summary=f"Document reprocessed successfully as {target_id}. Ticket resolved.",
+            )
+        )
+        comment_body = (
+            f"Approved: master data creation signed off. Document reprocessed as {target_id}."
+        )
+        if note:
+            comment_body = f"{comment_body} {note}"
+        ticket.comments.append(
+            TicketComment(
+                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+                author=actor,
+                text=comment_body,
+                created_at=now,
+            )
+        )
+
+    ticket.updated_at = now
+    ticket.current_stage_started_at = now
+    document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
+
+
+_MAPPING_TYPE_BY_REASON_PREFIX: dict[str, str] = {
+    "MP_GL_ACCOUNT": "gl_account",
+    "MP_COST_CENTER": "cost_center",
+    "MP_PROFIT_CENTER": "profit_center",
+}
+
+
+@app.post("/api/tickets/{ticket_id}/maintain-mapping")
+def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> Ticket:
+    ticket = _require_ticket(ticket_id)
+    mapping_type = next(
+        (
+            value
+            for prefix, value in _MAPPING_TYPE_BY_REASON_PREFIX.items()
+            if ticket.reason_code.startswith(prefix)
+        ),
+        None,
+    )
+    if mapping_type is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Mapping maintenance only applies to missing-mapping (MP_*) tickets.",
+        )
+
+    target_value = request.target_value.strip()
+    if not target_value:
+        raise HTTPException(status_code=400, detail="Target value cannot be empty.")
+
+    source_value = (request.source_value or "").strip() or _source_value_for_ticket(
+        ticket, mapping_type
+    )
+
+    run = _rerun_ticket_workflow(ticket, approve=False)
+    now = utc_now()
+    actor = request.actor.strip() or "Workbench User"
+    note = (request.note or "").strip()
+
+    ticket.workflow_run = run
+    if run.agent_summary:
+        ticket.agent_summary = run.agent_summary
+    ticket.timeline.append(
+        TicketEvent(
+            timestamp=now,
+            actor=actor,
+            action="mapping_maintained",
+            details={
+                "mapping_type": mapping_type,
+                "source_value": source_value,
+                "target_value": target_value,
+            },
+            summary=(
+                f"Source-to-target {mapping_type.replace('_', ' ')} mapping maintained: "
+                f"{source_value} → {target_value}."
+            ),
+        )
+    )
+
+    reprocessed = bool(run.reprocess_result and run.reprocess_result.success)
+    if reprocessed:
+        target_id = run.reprocess_result.target_document_id
+        previous_status = ticket.operator_status
+        ticket.operator_status = OperatorStatus.RESOLVED
+        ticket.timeline.append(
+            TicketEvent(
+                timestamp=now,
+                actor="reprocessing_controller",
+                action="reprocess_completed",
+                from_status=_operator_as_journey(previous_status),
+                to_status=TicketStatus.RESOLVED,
+                details={"target_document_id": target_id},
+                summary=f"Document reprocessed successfully as {target_id}. Ticket resolved.",
+            )
+        )
+        comment_body = (
+            f"Mapping maintained ({source_value} → {target_value}); "
+            f"document reprocessed as {target_id}."
+        )
+        if note:
+            comment_body = f"{comment_body} {note}"
+        ticket.comments.append(
+            TicketComment(
+                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+                author=actor,
+                text=comment_body,
+                created_at=now,
+            )
+        )
+
+    ticket.updated_at = now
+    ticket.current_stage_started_at = now
+    document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
 
 
 @app.post("/api/tickets/{ticket_id}/attachments")
@@ -288,30 +589,24 @@ async def upload_ticket_attachment(
             detail=f"File exceeds {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB limit.",
         )
 
-    tickets = load_tickets()
-    for index, ticket in enumerate(tickets):
-        if ticket.ticket_id != ticket_id:
-            continue
-        now = datetime.utcnow()
-        attachment_id = f"ATT-{uuid4().hex[:8].upper()}"
-        save_attachment_bytes(ticket_id, attachment_id, filename, content)
-        ticket.attachments.append(
-            TicketAttachment(
-                attachment_id=attachment_id,
-                filename=filename,
-                content_type=content_type,
-                size_bytes=len(content),
-                uploaded_at=now,
-                uploaded_by=actor.strip() or "Workbench User",
-                purpose=purpose.strip() or "resolution_proof",
-            )
+    ticket = _require_ticket(ticket_id)
+    now = utc_now()
+    attachment_id = f"ATT-{uuid4().hex[:8].upper()}"
+    save_attachment_bytes(ticket_id, attachment_id, filename, content)
+    ticket.attachments.append(
+        TicketAttachment(
+            attachment_id=attachment_id,
+            filename=filename,
+            content_type=content_type,
+            size_bytes=len(content),
+            uploaded_at=now,
+            uploaded_by=actor.strip() or "Workbench User",
+            purpose=purpose.strip() or "resolution_proof",
         )
-        ticket.updated_at = now
-        tickets[index] = ticket
-        save_tickets(tickets)
-        return enrich_ticket(ticket)
-
-    raise HTTPException(status_code=404, detail=f"Unknown ticket_id '{ticket_id}'")
+    )
+    ticket.updated_at = now
+    document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
 
 
 @app.get("/api/tickets/{ticket_id}/attachments/{attachment_id}")
@@ -351,74 +646,69 @@ def transition_ticket(ticket_id: str, request: TransitionRequest) -> Ticket:
             detail="At least one reprocessing proof attachment is required when resolving.",
         )
 
-    tickets = load_tickets()
-    for index, ticket in enumerate(tickets):
-        if ticket.ticket_id != ticket_id:
-            continue
+    ticket = _require_ticket(ticket_id)
 
-        if request.operator_status == OperatorStatus.RESOLVED:
-            known_ids = {item.attachment_id for item in ticket.attachments}
-            missing = [item for item in request.attachment_ids if item not in known_ids]
-            if missing:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unknown attachment ids for ticket: {', '.join(missing)}",
-                )
-
-        previous = ticket.operator_status
-        now = datetime.utcnow()
-        actor = request.actor.strip() or "Workbench User"
-        ticket.operator_status = request.operator_status
-        ticket.updated_at = now
-        ticket.current_stage_started_at = now
-
-        if request.operator_status == OperatorStatus.BLOCKED:
-            note = (request.note or "").strip()
-            ticket.comments.append(
-                TicketComment(
-                    comment_id=f"CMT-{uuid4().hex[:8].upper()}",
-                    author=actor,
-                    text=f"Blocked: {note}",
-                    created_at=now,
-                )
+    if request.operator_status == OperatorStatus.RESOLVED:
+        known_ids = {item.attachment_id for item in ticket.attachments}
+        missing = [item for item in request.attachment_ids if item not in known_ids]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown attachment ids for ticket: {', '.join(missing)}",
             )
 
-        if request.operator_status == OperatorStatus.RESOLVED:
-            note = (request.note or "").strip()
-            proof_names = [
-                item.filename
-                for item in ticket.attachments
-                if item.attachment_id in request.attachment_ids
-            ]
-            comment_body = f"Resolved: reprocessing proof attached ({', '.join(proof_names)})."
-            if note:
-                comment_body = f"{comment_body} {note}"
-            ticket.comments.append(
-                TicketComment(
-                    comment_id=f"CMT-{uuid4().hex[:8].upper()}",
-                    author=actor,
-                    text=comment_body,
-                    created_at=now,
-                )
-            )
+    previous = ticket.operator_status
+    now = utc_now()
+    actor = request.actor.strip() or "Workbench User"
+    ticket.operator_status = request.operator_status
+    ticket.updated_at = now
+    ticket.current_stage_started_at = now
 
-        ticket.timeline.append(
-            TicketEvent(
-                timestamp=now,
-                actor=actor,
-                action="manual_transition",
-                from_status=_operator_as_journey(previous),
-                to_status=_operator_as_journey(request.operator_status),
-                details={
-                    "note": (request.note or "").strip(),
-                    "attachment_ids": request.attachment_ids,
-                },
+    if request.operator_status == OperatorStatus.BLOCKED:
+        note = (request.note or "").strip()
+        ticket.comments.append(
+            TicketComment(
+                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+                author=actor,
+                text=f"Blocked: {note}",
+                created_at=now,
             )
         )
-        tickets[index] = ticket
-        save_tickets(tickets)
-        return enrich_ticket(ticket)
-    raise HTTPException(status_code=404, detail=f"Unknown ticket_id '{ticket_id}'")
+
+    if request.operator_status == OperatorStatus.RESOLVED:
+        note = (request.note or "").strip()
+        proof_names = [
+            item.filename
+            for item in ticket.attachments
+            if item.attachment_id in request.attachment_ids
+        ]
+        comment_body = f"Resolved: reprocessing proof attached ({', '.join(proof_names)})."
+        if note:
+            comment_body = f"{comment_body} {note}"
+        ticket.comments.append(
+            TicketComment(
+                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+                author=actor,
+                text=comment_body,
+                created_at=now,
+            )
+        )
+
+    ticket.timeline.append(
+        TicketEvent(
+            timestamp=now,
+            actor=actor,
+            action="manual_transition",
+            from_status=_operator_as_journey(previous),
+            to_status=_operator_as_journey(request.operator_status),
+            details={
+                "note": (request.note or "").strip(),
+                "attachment_ids": request.attachment_ids,
+            },
+        )
+    )
+    document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
 
 
 @app.get("/api/dashboard/summary")
@@ -451,7 +741,50 @@ def _operator_as_journey(status: OperatorStatus) -> TicketStatus:
 
 
 def _find_ticket(ticket_id: str) -> Ticket | None:
-    return next((ticket for ticket in load_tickets() if ticket.ticket_id == ticket_id), None)
+    return document_store.get_ticket(ticket_id)
+
+
+def _require_ticket(ticket_id: str) -> Ticket:
+    ticket = document_store.get_ticket(ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=f"Unknown ticket_id '{ticket_id}'")
+    return ticket
+
+
+def _rerun_ticket_workflow(ticket: Ticket, *, approve: bool) -> WorkflowRun:
+    """Re-run the governed workflow for a ticket's document.
+
+    Runs the deterministic controller directly: an operator-triggered follow-up
+    (approval, mapping maintenance) is a policy-controlled action, not a fresh
+    agent investigation, and must return synchronously to the UI.
+    """
+    repository = StagedDocumentRepository(load_staging_records())
+    workflow = AgenticWorkflow(repository=repository, approval_store=ApprovalStore())
+    return workflow.run(
+        document_id=ticket.document_id,
+        approve=approve,
+        force_deterministic=True,
+    )
+
+
+def _source_value_for_ticket(ticket: Ticket, mapping_type: str) -> str:
+    record = next(
+        (item for item in load_staging_records() if item.case_id == ticket.case_id),
+        None,
+    )
+    if record is None:
+        return "unknown"
+    value = getattr(record.document, mapping_type, None)
+    return value or "unknown"
+
+
+def _append_feedback_log(record: dict) -> None:
+    try:
+        log_path = runtime_data_dir() / "summary_feedback.jsonl"
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
 
 
 def _matches(
@@ -483,6 +816,9 @@ def _ticket_list_item(ticket: Ticket) -> dict:
         "description": ticket_title(ticket),
         "reason_description": ticket.reason_description or ticket.reason_code,
         "company_code": ticket.company_code,
+        "amount": ticket.amount,
+        "currency": ticket.currency,
+        "amount_usd": round(usd_equivalent(ticket.amount, ticket.currency), 2),
         "priority": ticket.priority.value,
         "operator_status": ticket.operator_status.value,
         "reason_code": ticket.reason_code,

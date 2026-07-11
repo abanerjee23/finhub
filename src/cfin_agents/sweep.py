@@ -20,7 +20,12 @@ from cfin_agents.ticketing import create_ticket, dashboard_summary
 from cfin_agents.workflow import AgenticWorkflow
 
 
-def sweep_agentic_batch(*, batch_size: int = 5, approve: bool = False) -> list[dict]:
+def sweep_agentic_batch(
+    *,
+    batch_size: int = 5,
+    approve: bool = False,
+    progress_callback=None,
+) -> list[dict]:
     pending = claim_new_staging_records(batch_size)
     if not pending:
         return []
@@ -64,6 +69,8 @@ def sweep_agentic_batch(*, batch_size: int = 5, approve: bool = False) -> list[d
                     "error": str(exc),
                 }
             )
+        if progress_callback is not None:
+            progress_callback(len(results), len(pending), results[-1])
     return results
 
 

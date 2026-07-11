@@ -16,3 +16,5 @@ frontend/node_modules/
 frontend/dist/
 data/synthetic/finhub.db
 data/synthetic/attachments/
+data/synthetic/agent_shadow_log.jsonl
+data/synthetic/summary_feedback.jsonl
