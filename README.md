@@ -6,26 +6,27 @@ For the business case and design narrative, see [`finhub.md`](finhub.md).
 
 ## Introduction
 
-The primary demo surface is the React **workbench** — a single-screen operations console where finance analysts triage failed documents after autonomous agents have already run. Seed the queue, run agent processing, inspect diagnoses, update ticket status, attach proof, and jump to Langfuse traces — no terminal required.
+The primary demo surface is the React **workbench** — a single-screen operations console where finance analysts triage failed documents after autonomous agents have already run. Seed the queue, run agent processing, inspect diagnoses, approve or maintain mappings to close out blocked documents, update ticket status, attach proof, and jump to Langfuse traces — no terminal required.
 
 **Live app:** [https://scalefinhub.up.railway.app/](https://scalefinhub.up.railway.app/)
 
-![FinHub workbench — ticket detail with agent diagnosis, analytics sidebar, and searchable ticket queue (deployed on Railway)](docs/images/finhub-workbench.png)
+![FinHub workbench — Business Impact panel, ticket detail with agent diagnosis and Approve & Reprocess action, analytics sidebar, and searchable ticket queue](docs/images/finhub-workbench.png)
 
 **Demo loop:**
 
 ```text
-Reset & seed queue  →  Run agent processing  →  Triage tickets  →  View trace in Langfuse
+Reset & seed queue  →  Run agent processing  →  Approve / maintain mapping  →  Triage tickets  →  View trace in Langfuse
 ```
 
 | UI area | Purpose |
 |---------|---------|
-| **Workbench Controls** | Seed count, reset queue, sweep batch size, refresh |
-| **Analytics** | Total/active tickets, status breakdown, owner chart |
-| **Ticket detail** | Agent diagnosis hero, policy context, comments, proof uploads, activity log, **View trace in Langfuse** (when configured) |
-| **Search Tickets** | Filter and update `operator_status` inline |
+| **Workbench Controls** | Seed count, reset queue, sweep batch size (runs as a background job with a progress bar), refresh |
+| **Business Impact** | Open value at risk / total value failed (USD-equivalent), by company code and source system (click to filter), SLA breaches, ticket aging, automation rate |
+| **Analytics** | Total/active tickets, status breakdown, owner chart, stage times |
+| **Ticket detail** | Agent diagnosis hero (execution-mode badge, 👍/👎 summary feedback), **Approve & Reprocess** / **Maintain Mapping** actions, assignee reassignment, comments, proof uploads, activity log, **View trace in Langfuse** (when configured) |
+| **Search Tickets** | Filter and update `operator_status` inline, business-filter chips, bulk status moves |
 
-Operator statuses: **Assigned**, **In Progress**, **Blocked** (requires comment), **Resolved** (requires proof attachment). Agent policy outcomes (`needs_approval`, `blocked`, etc.) live in `workflow_run` and the diagnosis summary — not as separate status pills.
+Operator statuses: **Assigned**, **In Progress**, **Blocked** (requires comment), **Resolved** (requires proof attachment). Agent policy outcomes (`needs_approval`, `blocked`, etc.) live in `workflow_run` and the diagnosis summary. `needs_approval` tickets get an **Approve & Reprocess** action; missing-mapping (`MP_*`) tickets get a **Maintain Mapping** action — both resolve the ticket in place instead of requiring the CLI.
 
 Architecture details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -131,6 +132,7 @@ The **workbench UI** (`Reset & seed` / `Run agent processing`) is the recommende
 - `SUMMARY_USE_LLM`: set to `1` to generate and persist LLM analyst summaries on tickets (recommended for demos).
 - `SUMMARY_JUDGE_MODEL`: model for Promptfoo LLM judge evals, defaults to `gpt-4o` (evals only).
 - `DISABLE_LLM`: set to `1` to force deterministic execution (no agent orchestration).
+- `CONFIDENCE_REVIEW_THRESHOLD`: diagnosis confidence below this value routes to human review (`needs_approval`), defaults to `0.5` (the deterministic classifier emits 0.8-0.95, so the default never changes existing eval outcomes).
 - `FINHUB_DATA_DIR`: directory for SQLite DB and local attachments (default: `data/synthetic`; on Railway use `/data/finhub` with a mounted volume).
 - `RAILWAY_RUN_UID`: set to `0` on Railway when using Docker + volumes (Railway-only; not in local `.env`).
 - `STORAGE_BACKEND`: `local` (default) or `s3` for attachment blob storage.
