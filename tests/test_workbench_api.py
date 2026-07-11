@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 
-def _client(tmp_path, monkeypatch, *, stage_lag_seconds: float = 0.2):
+def _client(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from cfin_agents import document_store
@@ -14,22 +14,7 @@ def _client(tmp_path, monkeypatch, *, stage_lag_seconds: float = 0.2):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("DISABLE_LLM", "1")
     monkeypatch.setenv("SUMMARY_USE_LLM", "0")
-    monkeypatch.setenv("WORKFLOW_STAGE_LAG_SECONDS", str(stage_lag_seconds))
     return TestClient(app)
-
-
-def _wait_for_workflow_status(client, ticket_id: str, expected: str, *, timeout: float = 10.0):
-    deadline = time.time() + timeout
-    detail = None
-    while time.time() < deadline:
-        detail = client.get(f"/api/tickets/{ticket_id}").json()
-        if detail["workflow_run"]["status"] == expected:
-            return detail
-        time.sleep(0.05)
-    raise AssertionError(
-        f"ticket {ticket_id} never reached '{expected}' "
-        f"(last seen: {detail['workflow_run']['status'] if detail else 'unknown'})"
-    )
 
 
 def test_workbench_reset_and_sweep(tmp_path, monkeypatch) -> None:
@@ -111,7 +96,7 @@ def test_dashboard_business_metrics(tmp_path, monkeypatch) -> None:
     assert payload["fx_rates_to_usd"]["USD"] == 1.0
 
 
-def test_approve_stages_through_pipeline_before_resolve(tmp_path, monkeypatch) -> None:
+def test_approve_create_master_data_then_reprocess_before_resolve(tmp_path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     client.post("/api/workbench/reset?count=12&seed=3")
     client.post("/api/workbench/sweep", json={"batch_size": 12, "wait": True})
@@ -121,25 +106,19 @@ def test_approve_stages_through_pipeline_before_resolve(tmp_path, monkeypatch) -
     assert pending, "expected at least one needs_approval ticket in seed 3"
     ticket_id = pending[0]["ticket_id"]
 
-    approved = client.post(
-        f"/api/tickets/{ticket_id}/approve",
-        json={"actor": "Test Approver", "note": "Approved in test"},
-    )
-    assert approved.status_code == 200
-    payload = approved.json()
-    # Approval is immediate, but reprocessing is not — no auto-resolve.
-    assert payload["workflow_run"]["status"] == "approved"
-    assert payload["workflow_run"]["reprocess_result"] is None
-    assert payload["operator_status"] != "resolved"
-    actions = [event["action"] for event in payload["timeline"]]
-    assert "approval_recorded" in actions
+    before = client.get(f"/api/tickets/{ticket_id}").json()
+    auto_actions = {
+        event["action"]
+        for event in before["timeline"]
+        if event["action"]
+        in {"failed_document_loaded", "diagnosis_completed", "ticket_assigned"}
+    }
+    assert auto_actions == {
+        "failed_document_loaded",
+        "diagnosis_completed",
+        "ticket_assigned",
+    }
 
-    # A second approve while already in-flight must be rejected.
-    again = client.post(f"/api/tickets/{ticket_id}/approve", json={"actor": "Test Approver"})
-    assert again.status_code == 400
-
-    # Resolving before the pipeline completes is rejected (gate checked before
-    # the attachment-id itself is validated, so this proves the stage gate).
     too_early = client.post(
         f"/api/tickets/{ticket_id}/transition",
         json={"operator_status": "resolved", "attachment_ids": ["ATT-FAKE"], "note": "premature"},
@@ -147,15 +126,50 @@ def test_approve_stages_through_pipeline_before_resolve(tmp_path, monkeypatch) -
     assert too_early.status_code == 400
     assert "reprocessed" in too_early.json()["detail"].lower()
 
-    # The pipeline passes through ready_for_reprocessing on its way to
-    # reprocessed; poll for the final state and verify the intermediate stage
-    # was recorded in history (checking it live would be a timing race).
-    detail = _wait_for_workflow_status(client, ticket_id, "reprocessed")
-    assert detail["workflow_run"]["reprocess_result"]["target_document_id"]
-    events = {event["action"] for event in detail["timeline"]}
-    assert {"approval_recorded", "ready_for_reprocessing", "reprocess_completed"} <= events
+    approved = client.post(
+        f"/api/tickets/{ticket_id}/approve",
+        json={"note": "Approved in test"},
+    )
+    assert approved.status_code == 200
+    payload = approved.json()
+    # Approval is a manual governance step, not an automatic reprocess.
+    assert payload["workflow_run"]["status"] == "approved"
+    assert payload["workflow_run"]["reprocess_result"] is None
+    assert payload["operator_status"] != "resolved"
+    actions = [event["action"] for event in payload["timeline"]]
+    assert "approval_recorded" in actions
+    assert payload["timeline"][-1]["actor"] == "Asha Rao — Master Data Governance Approver"
 
-    # Resolving still requires proof + a reason, but is now allowed.
+    # A second approve after the approval step must be rejected.
+    again = client.post(f"/api/tickets/{ticket_id}/approve", json={})
+    assert again.status_code == 400
+
+    still_too_early = client.post(
+        f"/api/tickets/{ticket_id}/transition",
+        json={"operator_status": "resolved", "attachment_ids": ["ATT-FAKE"], "note": "premature"},
+    )
+    assert still_too_early.status_code == 400
+    assert "reprocessed" in still_too_early.json()["detail"].lower()
+
+    created = client.post(f"/api/tickets/{ticket_id}/create-master-data", json={})
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["workflow_run"]["status"] == "ready_for_reprocessing"
+    assert payload["workflow_run"]["reprocess_result"] is None
+    assert payload["timeline"][-1]["action"] == "master_data_created"
+    assert payload["timeline"][-1]["actor"] == "Mina Patel — Master Data Specialist"
+
+    reprocessed = client.post(f"/api/tickets/{ticket_id}/reprocess", json={})
+    assert reprocessed.status_code == 200
+    payload = reprocessed.json()
+    assert payload["workflow_run"]["status"] == "reprocessed"
+    assert payload["workflow_run"]["reprocess_result"]["target_document_id"]
+    assert payload["operator_status"] != "resolved"
+    assert payload["timeline"][-1]["action"] == "document_reprocessed"
+    assert payload["timeline"][-1]["actor"] == "Owen Clarke — CFIN Reprocessing Operator"
+    assert "reprocess_completed" not in [event["action"] for event in payload["timeline"]]
+
+    # Resolving still requires proof + a reason.
     no_reason = client.post(
         f"/api/tickets/{ticket_id}/transition",
         json={"operator_status": "resolved", "attachment_ids": ["ATT-FAKE"]},
@@ -170,12 +184,11 @@ def test_approve_stages_through_pipeline_before_resolve(tmp_path, monkeypatch) -
             "note": "Confirmed in target system.",
         },
     )
-    # Past the reprocessed-stage gate now; fails only on the fake attachment id.
     assert resolved.status_code == 400
     assert "unknown attachment" in resolved.json()["detail"].lower()
 
 
-def test_maintain_mapping_stages_through_pipeline_before_resolve(tmp_path, monkeypatch) -> None:
+def test_maintain_mapping_then_reprocess_before_resolve(tmp_path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     client.post("/api/workbench/reset?count=12&seed=3")
     client.post("/api/workbench/sweep", json={"batch_size": 12, "wait": True})
@@ -199,10 +212,13 @@ def test_maintain_mapping_stages_through_pipeline_before_resolve(tmp_path, monke
     assert payload["operator_status"] != "resolved"
     events = {event["action"]: event for event in payload["timeline"]}
     assert "mapping_maintained" in events
+    assert events["mapping_maintained"]["actor"] == "Test Analyst"
     assert events["mapping_maintained"]["details"]["target_value"] == "CC-TARGET-999"
     assert events["mapping_maintained"]["details"]["source_value"] not in ("", None)
+    assert "ready_for_reprocessing" not in events
+    assert "reprocess_completed" not in events
 
-    # A second maintain-mapping call while already in-flight must be rejected.
+    # A second maintain-mapping call after completion must be rejected.
     again = client.post(
         f"/api/tickets/{ticket_id}/maintain-mapping",
         json={"target_value": "CC-TARGET-000"},
@@ -218,8 +234,20 @@ def test_maintain_mapping_stages_through_pipeline_before_resolve(tmp_path, monke
         )
         assert rejected.status_code == 400
 
-    detail = _wait_for_workflow_status(client, ticket_id, "reprocessed")
-    assert detail["workflow_run"]["reprocess_result"]["target_document_id"]
+    too_early = client.post(
+        f"/api/tickets/{ticket_id}/transition",
+        json={"operator_status": "resolved", "attachment_ids": ["ATT-FAKE"], "note": "premature"},
+    )
+    assert too_early.status_code == 400
+    assert "reprocessed" in too_early.json()["detail"].lower()
+
+    reprocessed = client.post(f"/api/tickets/{ticket_id}/reprocess", json={})
+    assert reprocessed.status_code == 200
+    payload = reprocessed.json()
+    assert payload["workflow_run"]["status"] == "reprocessed"
+    assert payload["workflow_run"]["reprocess_result"]["target_document_id"]
+    assert payload["timeline"][-1]["action"] == "document_reprocessed"
+    assert payload["timeline"][-1]["actor"] == "Owen Clarke — CFIN Reprocessing Operator"
 
     resolved = client.post(
         f"/api/tickets/{ticket_id}/transition",
@@ -229,7 +257,6 @@ def test_maintain_mapping_stages_through_pipeline_before_resolve(tmp_path, monke
             "note": "Confirmed reprocessed.",
         },
     )
-    # Past the reprocessed-stage gate now; fails only on the fake attachment id.
     assert resolved.status_code == 400
     assert "unknown attachment" in resolved.json()["detail"].lower()
 

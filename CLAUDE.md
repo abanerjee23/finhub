@@ -76,16 +76,20 @@ Self-contained demo loop in the UI (`frontend/src/App.tsx` orchestrates; compone
 - **Workbench Controls** — reset/seed queue, run agent processing (async sweep job with progress bar), refresh
 - **Business Impact** — open value at risk / total value failed (USD-equivalent via fixed demo FX in `ticketing.FX_RATES_TO_USD`), open value by company code / source system (click-to-filter the ticket list), SLA breach count+value, aging buckets, automation rate
 - **Analytics** — KPIs, operator status breakdown, owner chart, stage times
-- **Ticket detail** — agent diagnosis hero (execution-mode badge, 👍/👎 summary feedback, shadow-mode agent note), **Approve & Reprocess** for `needs_approval` tickets, **Maintain Mapping** for `needs_mapping` tickets, a live pipeline stepper while the staged reprocess runs, assignee reassignment, metadata, comments, proof attachments, activity log
+- **Ticket detail** — agent diagnosis hero (execution-mode badge, 👍/👎 summary feedback, shadow-mode agent note), governed workflow actions (approve, create master data, maintain mapping, reprocess), assignee reassignment, metadata, comments, proof attachments, activity log
 - **Search Tickets** — filter, inline `operator_status` dropdown, bulk status moves (assigned/in-progress only)
 
 API: `src/cfin_agents/api.py`. Workbench endpoints under `/api/workbench/*`; sweep runs as a background job (`POST /api/workbench/sweep` → job id, poll `GET /api/workbench/sweep/jobs/{id}`; pass `"wait": true` for synchronous test use). Ticket transitions use `operator_status` (not legacy `status` + policy flags). Ticket mutations use per-ticket `get_ticket`/`upsert_ticket` writes — never rewrite the whole table in endpoints.
 
-**Human-in-the-loop ticket actions are staged, not atomic** — approving or maintaining a mapping never auto-resolves a ticket. Each kicks off a delayed background pipeline (`_schedule_reprocessing_pipeline` in api.py, `threading.Timer`, interval `WORKFLOW_STAGE_LAG_SECONDS` env, default 6s per stage) simulating the real lag between a sign-off and the document actually landing in the target system:
-- `POST /api/tickets/{id}/approve` — `needs_approval` only. Immediately records approval and moves `workflow_run.status` to `approved` (no `reprocess_result` yet, ticket stays `assigned`/`in_progress`). After the lag: `ready_for_reprocessing`, then `reprocessed` with the real `reprocess_result`.
-- `POST /api/tickets/{id}/maintain-mapping` — `needs_mapping` only (guarded; a second call while in-flight is rejected). Same staged progression: `mapping_maintained` → `ready_for_reprocessing` → `reprocessed`.
-- The ticket owner then manually sets `operator_status=resolved` via `POST /api/tickets/{id}/transition`, which now requires **both** a proof attachment **and** a non-empty `note` (the closing reason), and is rejected with a 400 if the ticket's remediation action is staged and hasn't reached `reprocessed` yet.
+**Human-in-the-loop governance** — the activity log auto-writes only `received` / `diagnosed` / `assigned` at ticket creation. Everything after that is a human action:
+- `POST /api/tickets/{id}/approve` — `needs_approval` only. Records **Approved** by the master-data approver and moves `workflow_run.status` to `approved`. Does not create data, reprocess, or resolve.
+- `POST /api/tickets/{id}/create-master-data` — `approved` master-data tickets only. Records **Master Data Created** by the data specialist and moves to `ready_for_reprocessing`.
+- `POST /api/tickets/{id}/maintain-mapping` — `needs_mapping` only (guarded; a second call is rejected). Records **Mapping Maintained** by the mapping steward and moves to `mapping_maintained`.
+- `POST /api/tickets/{id}/reprocess` — `ready_for_reprocessing` / `mapping_maintained` only. Records **Reprocessed** by the CFIN reprocessing operator and applies the governed reprocess outcome (`workflow_run.status=reprocessed`).
+- `POST /api/tickets/{id}/transition` to `resolved` — requires **both** a proof attachment **and** a non-empty note, and is rejected with a 400 until `workflow_run.status == reprocessed` for approve/mapping remediation paths. After reprocessing, the operator shares evidence with the ticket owner; the owner (or reconciliation analyst) uploads proof and resolves.
 - `PATCH /api/tickets/{id}/assignee`, `POST /api/tickets/{id}/summary-feedback` (rating logged to `{FINHUB_DATA_DIR}/summary_feedback.jsonl`)
+
+**Demo personas:** Asha Rao (approve), Mina Patel (create master data), Lars Becker (maintain mapping), Owen Clarke (reprocess), Nora Singh (proof + resolve). Mapping tickets skip approval/master-data steps.
 
 ### Persistence
 
@@ -100,9 +104,9 @@ Env: `FINHUB_DATA_DIR`, `STORAGE_BACKEND`, `S3_*`. Legacy ticket payloads migrat
 ### Ticket status model
 
 - **`operator_status`** — human queue status: `assigned`, `in_progress`, `blocked`, `resolved`
-- **`workflow_run.status`** — agent policy / pipeline stage; exposed as `workflow_status` in list API. Values produced by the deterministic engine (`WorkflowStatus` in models.py): `needs_approval`, `blocked`, `reprocessed`, `diagnosed`, `new`. Values that exist **only** as workbench ticket-presentation states, assigned/advanced by the API layer and never returned by `DeterministicWorkflow.run()`: `needs_mapping` (a freshly created `MAINTAIN_SOURCE_MAPPING` ticket — capped at creation via `ticketing.cap_pending_mapping_run()`, since the deterministic engine itself doesn't gate this action on approval), `approved`, `mapping_maintained`, `ready_for_reprocessing`. See the staged-pipeline note above.
-- **`timeline`** — internal journey + manual transitions (Activity Log in UI)
-- **`agent_summary`** — persisted at ticket creation (`generate_analyst_summary()`); LLM when `SUMMARY_USE_LLM=1`, else eval-aligned deterministic template. `resolve_agent_summary()` polishes stored text on read and returns `None` for missing/legacy summaries (no on-read regeneration). Not regenerated at intermediate pipeline stages — only refreshed once a ticket reaches `reprocessed`.
+- **`workflow_run.status`** — agent policy / document outcome plus manual workbench milestones; exposed as `workflow_status` in list API. Values produced by the deterministic engine (`WorkflowStatus` in models.py): `needs_approval`, `blocked`, `reprocessed`, `diagnosed`, `new`. Workbench-only values: `needs_mapping` (a freshly created `MAINTAIN_SOURCE_MAPPING` ticket capped via `ticketing.cap_pending_mapping_run()`), `approved`, `mapping_maintained`, `ready_for_reprocessing`.
+- **`timeline`** — activity log. Auto-populated only through assigned; later entries come from human governance actions (approve, maintain mapping, status transitions, reassignment).
+- **`agent_summary`** — persisted at ticket creation (`generate_analyst_summary()`); LLM when `SUMMARY_USE_LLM=1`, else eval-aligned deterministic template. `resolve_agent_summary()` polishes stored text on read and returns `None` for missing/legacy summaries (no on-read regeneration). Refreshed when approve/maintain-mapping reaches `reprocessed`.
 
 ### Service Pipeline (services.py)
 
@@ -114,7 +118,7 @@ SyntheticRepository → Validator → DiagnosisService → RemediationPlanner �
 - `CREATE_TARGET_MASTER_DATA` without approval → `NEEDS_APPROVAL`, blocked
 - `CREATE_TARGET_MASTER_DATA` with approval → allowed, reprocess
 - `CLOSED_POSTING_PERIOD` → always `BLOCKED` (requires external controller action)
-- `MAINTAIN_SOURCE_MAPPING` → allowed unconditionally (no approval-store gate); a single `workflow.run()` call resolves straight to `reprocessed`. The workbench ticket layer (not the deterministic engine) re-adds the "hasn't been maintained yet" gate for ticket presentation — see the staged-pipeline note above. CLI/eval single-shot runs are unaffected.
+- `MAINTAIN_SOURCE_MAPPING` → allowed unconditionally (no approval-store gate); a single `workflow.run()` call resolves straight to `reprocessed`. The workbench ticket layer (not the deterministic engine) re-adds the "hasn't been maintained yet" gate for ticket presentation via `needs_mapping` + Maintain Mapping. CLI/eval single-shot runs are unaffected.
 - Diagnosis confidence below `CONFIDENCE_REVIEW_THRESHOLD` (env, default 0.5) → `NEEDS_APPROVAL` (human review); the default never trips on the deterministic classifier (0.8–0.95), keeping evals unchanged
 
 **DeterministicWorkflow** orchestrates all services and records an `AuditLog` at each step. After the run, `generate_analyst_summary()` populates `agent_summary` (LLM when `SUMMARY_USE_LLM=1` + key; deterministic template otherwise).

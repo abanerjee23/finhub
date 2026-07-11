@@ -8,6 +8,7 @@ const RESOLUTION_PROOF_ACCEPT =
 const MAX_RESOLUTION_PROOF_FILES = 5;
 
 export type StatusChangeOptions = {
+  actor?: string;
   note?: string;
   attachmentIds?: string[];
 };
@@ -141,7 +142,11 @@ export function ResolvedProofDialog({
     try {
       const attachmentIds: string[] = [];
       for (const file of files) {
-        const updated = await uploadTicketAttachment(ticketId, file);
+        const updated = await uploadTicketAttachment(
+          ticketId,
+          file,
+          "Nora Singh — CFIN Reconciliation Analyst"
+        );
         const uploaded = updated.attachments?.[updated.attachments.length - 1];
         if (!uploaded) {
           throw new Error(`Could not attach ${file.name}.`);
@@ -149,6 +154,7 @@ export function ResolvedProofDialog({
         attachmentIds.push(uploaded.attachment_id);
       }
       await onConfirm({
+        actor: "Nora Singh — CFIN Reconciliation Analyst",
         note: note.trim(),
         attachmentIds
       });
@@ -297,8 +303,8 @@ export function ApproveDialog({
         >
           <h3 id={`approve-title-${ticketId}`}>Approve master data creation?</h3>
           <p className="modal-copy">
-            Your approval is recorded in the audit trail, the missing master data is created in
-            the target system, and the document is reprocessed under policy control.
+            Your approval is recorded in the activity log. Master data creation and document
+            reprocessing stay as separate manual governance steps.
           </p>
           <label htmlFor={`approve-note-${ticketId}`} className="modal-label">
             Optional note
@@ -319,7 +325,7 @@ export function ApproveDialog({
               Cancel
             </button>
             <button disabled={saving} onClick={() => void submit()} type="button">
-              {saving ? "Approving..." : "Approve & Reprocess"}
+              {saving ? "Approving..." : "Approve Master Data"}
             </button>
           </div>
         </div>
@@ -383,8 +389,8 @@ export function MaintainMappingDialog({
         >
           <h3 id={`mapping-title-${ticketId}`}>Maintain {mappingLabel} mapping</h3>
           <p className="modal-copy">
-            Record the source-to-target mapping entry, then the document is reprocessed. No
-            approval is required for mapping maintenance.
+            Record the source-to-target mapping entry. Reprocessing stays as a separate manual
+            governance step. No approval is required for mapping maintenance.
           </p>
           <label htmlFor={`mapping-source-${ticketId}`} className="modal-label">
             Source value

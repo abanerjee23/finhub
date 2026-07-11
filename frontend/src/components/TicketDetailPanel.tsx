@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   approveTicket,
   AssigneeOption,
-  getTicket,
+  createMasterData,
   maintainTicketMapping,
   patchTicketDescription,
   postSummaryFeedback,
   postTicketComment,
+  reprocessTicket,
   ticketAttachmentUrl,
   TicketDetail,
   updateTicketAssignee
@@ -19,14 +20,11 @@ import {
   formatJourneyTimestamp,
   formatTicketDate,
   humanize,
-  MAPPING_PIPELINE_STEPS,
-  MASTER_DATA_PIPELINE_STEPS,
   RESOLUTION_BENCHMARK_DAYS,
   splitIntoSentences,
   STAGE_LABELS,
   ticketDescription,
   ticketDueDate,
-  TRANSITIONAL_WORKFLOW_STATUSES,
   WORKFLOW_STATUS_LABELS
 } from "../lib/format";
 import { ApproveDialog, MaintainMappingDialog, StatusChangeOptions } from "./dialogs";
@@ -62,8 +60,6 @@ export function TicketDetailPanel({
   ) => Promise<void>;
   onWorkflowAction: (message: string) => void;
 }) {
-  useReprocessingPoll(ticket, onTicketUpdate);
-
   if (loading) {
     return <p className="empty">Loading ticket details...</p>;
   }
@@ -88,8 +84,6 @@ export function TicketDetailPanel({
         onTicketUpdate={onTicketUpdate}
         onWorkflowAction={onWorkflowAction}
       />
-
-      <ReprocessingPipeline ticket={ticket} />
 
       <div className="detail-grid">
         <Info label="Source System" value={ticket.source_system} />
@@ -119,72 +113,6 @@ export function TicketDetailPanel({
   );
 }
 
-const POLL_INTERVAL_MS = 1500;
-
-function useReprocessingPoll(
-  ticket: TicketDetail | null,
-  onTicketUpdate: (ticket: TicketDetail) => void
-) {
-  const ticketId = ticket?.ticket_id ?? null;
-  const status = ticket?.workflow_run.status ?? null;
-  const isTransitional = status !== null && TRANSITIONAL_WORKFLOW_STATUSES.has(status);
-
-  useEffect(() => {
-    if (!ticketId || !isTransitional) return;
-    let cancelled = false;
-    const interval = window.setInterval(async () => {
-      try {
-        const updated = await getTicket(ticketId);
-        if (!cancelled) onTicketUpdate(updated);
-      } catch {
-        // Transient poll failure; next tick retries.
-      }
-    }, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [ticketId, isTransitional, onTicketUpdate]);
-}
-
-function ReprocessingPipeline({ ticket }: { ticket: TicketDetail }) {
-  const action = ticket.workflow_run.remediation_plan.action;
-  const status = ticket.workflow_run.status;
-  const steps =
-    action === "create_target_master_data"
-      ? MASTER_DATA_PIPELINE_STEPS
-      : action === "maintain_source_mapping"
-        ? MAPPING_PIPELINE_STEPS
-        : null;
-
-  if (!steps) return null;
-  // Only show once the operator has kicked off the pipeline — the CTA button
-  // is enough for the initial needs_approval/needs_mapping state.
-  if (status === steps[0].key) return null;
-
-  const currentIndex = steps.findIndex((step) => step.key === status);
-
-  return (
-    <div className="reprocessing-pipeline">
-      {steps.map((step, index) => (
-        <div
-          className={`pipeline-step ${index <= currentIndex ? "pipeline-step-done" : ""} ${
-            index === currentIndex ? "pipeline-step-current" : ""
-          }`}
-          key={step.key}
-        >
-          <span className="pipeline-node" />
-          <span className="pipeline-label">{step.label}</span>
-          {index < steps.length - 1 ? <span className="pipeline-connector" /> : null}
-        </div>
-      ))}
-      {currentIndex >= 0 && currentIndex < steps.length - 1 ? (
-        <span className="pipeline-hint">Advancing automatically…</span>
-      ) : null}
-    </div>
-  );
-}
-
 function WorkflowActions({
   ticket,
   onTicketUpdate,
@@ -199,27 +127,74 @@ function WorkflowActions({
   const [busy, setBusy] = useState(false);
 
   const workflowStatus = ticket.workflow_run.status;
+  const action = ticket.workflow_run.remediation_plan.action;
   const mappingLabel = mappingLabelForReason(ticket.reason_code);
   const canApprove = workflowStatus === "needs_approval";
+  const canCreateMasterData =
+    action === "create_target_master_data" && workflowStatus === "approved";
   const canMaintainMapping = mappingLabel !== null && workflowStatus === "needs_mapping";
+  const canReprocess =
+    (action === "create_target_master_data" && workflowStatus === "ready_for_reprocessing") ||
+    (action === "maintain_source_mapping" && workflowStatus === "mapping_maintained");
 
-  if (!canApprove && !canMaintainMapping) return null;
+  if (!canApprove && !canCreateMasterData && !canMaintainMapping && !canReprocess) return null;
+
+  async function runManualStep(
+    step: () => Promise<TicketDetail>,
+    message: string
+  ): Promise<void> {
+    setBusy(true);
+    try {
+      const updated = await step();
+      onTicketUpdate(updated);
+      onWorkflowAction(message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="workflow-actions">
       {canApprove ? (
         <button disabled={busy} onClick={() => setApproveOpen(true)} type="button">
-          Approve &amp; Reprocess
+          Approve Master Data
+        </button>
+      ) : null}
+      {canCreateMasterData ? (
+        <button
+          disabled={busy}
+          onClick={() =>
+            void runManualStep(
+              () => createMasterData(ticket.ticket_id),
+              "Master data creation recorded. The document is ready for manual reprocessing."
+            )
+          }
+          type="button"
+        >
+          Create Master Data
         </button>
       ) : null}
       {canMaintainMapping ? (
         <button
-          className={canApprove ? "secondary" : undefined}
           disabled={busy}
           onClick={() => setMappingOpen(true)}
           type="button"
         >
           Maintain Mapping…
+        </button>
+      ) : null}
+      {canReprocess ? (
+        <button
+          disabled={busy}
+          onClick={() =>
+            void runManualStep(
+              () => reprocessTicket(ticket.ticket_id),
+              "Document reprocessed. Attach proof and set Current Status to Resolved when ready."
+            )
+          }
+          type="button"
+        >
+          Reprocess Document
         </button>
       ) : null}
       {approveOpen ? (
@@ -234,8 +209,7 @@ function WorkflowActions({
               onTicketUpdate(updated);
               setApproveOpen(false);
               onWorkflowAction(
-                "Approval recorded. Master data creation and reprocessing are now queued — " +
-                  "this ticket will advance automatically over the next moment."
+                "Approval recorded. Master data creation must be completed before reprocessing."
               );
             } finally {
               setBusy(false);
@@ -259,8 +233,7 @@ function WorkflowActions({
               onTicketUpdate(updated);
               setMappingOpen(false);
               onWorkflowAction(
-                "Mapping maintained. Reprocessing is now queued — this ticket will advance " +
-                  "automatically over the next moment."
+                "Mapping maintained. The document is ready for manual reprocessing."
               );
             } finally {
               setBusy(false);
@@ -626,9 +599,12 @@ const JOURNEY_ACTION_LABELS: Record<string, string> = {
   diagnosis_completed: "Diagnosed",
   ticket_assigned: "Assigned",
   work_started: "In Progress",
-  reprocess_completed: "Resolved",
+  reprocess_completed: "Reprocessed",
+  ready_for_reprocessing: "Ready for Reprocessing",
   approval_recorded: "Approved",
+  master_data_created: "Master Data Created",
   mapping_maintained: "Mapping Maintained",
+  document_reprocessed: "Reprocessed",
   reassigned: "Reassigned"
 };
 
@@ -646,7 +622,9 @@ function journeyStageKey(event: TicketDetail["timeline"][number]): string {
     diagnosis_completed: "diagnosed",
     ticket_assigned: "assigned",
     work_started: "in_progress",
-    reprocess_completed: "resolved"
+    reprocess_completed: "reprocessed",
+    ready_for_reprocessing: "ready_for_reprocessing",
+    document_reprocessed: "reprocessed"
   };
   return byAction[event.action] ?? "";
 }

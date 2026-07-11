@@ -97,14 +97,24 @@ class DescriptionUpdateRequest(BaseModel):
 
 
 class ApproveRequest(BaseModel):
-    actor: str = "Workbench User"
+    actor: str = "Asha Rao — Master Data Governance Approver"
+    note: str | None = None
+
+
+class CreateMasterDataRequest(BaseModel):
+    actor: str = "Mina Patel — Master Data Specialist"
     note: str | None = None
 
 
 class MaintainMappingRequest(BaseModel):
     target_value: str
     source_value: str | None = None
-    actor: str = "Workbench User"
+    actor: str = "Lars Becker — Source Mapping Steward"
+    note: str | None = None
+
+
+class ReprocessRequest(BaseModel):
+    actor: str = "Owen Clarke — CFIN Reprocessing Operator"
     note: str | None = None
 
 
@@ -279,108 +289,6 @@ def workbench_sweep_job(job_id: str) -> dict:
         return dict(job)
 
 
-def _stage_lag_seconds() -> float:
-    """Seconds between each staged transition in the human-in-the-loop
-    reprocessing pipeline (Approved/Mapping Maintained -> Ready for
-    Reprocessing -> Reprocessed). Simulates the real lag between a sign-off
-    and the document actually landing in the target system, instead of
-    resolving everything in one request. Read per-call (not cached at import)
-    so tests can override it via env var."""
-    try:
-        return float(os.getenv("WORKFLOW_STAGE_LAG_SECONDS", "6"))
-    except ValueError:
-        return 6.0
-
-
-def _advance_ticket_stage(
-    ticket_id: str,
-    *,
-    action: str,
-    summary: str,
-    next_status: WorkflowStatus | None = None,
-    final_run: WorkflowRun | None = None,
-    details: dict | None = None,
-    comment: str | None = None,
-) -> None:
-    """Advance one ticket's workflow_run.status, reloading it fresh from the
-    store first so a concurrent operator edit (comment, reassignment) made
-    while this stage was pending isn't clobbered."""
-    ticket = document_store.get_ticket(ticket_id)
-    if ticket is None:
-        return  # ticket was reset/deleted while this stage was pending
-    now = utc_now()
-    if final_run is not None:
-        ticket.workflow_run = final_run
-        if final_run.agent_summary:
-            ticket.agent_summary = final_run.agent_summary
-    elif next_status is not None:
-        ticket.workflow_run = ticket.workflow_run.model_copy(update={"status": next_status})
-    ticket.updated_at = now
-    ticket.timeline.append(
-        TicketEvent(
-            timestamp=now,
-            actor="reprocessing_controller",
-            action=action,
-            details=details or {},
-            summary=summary,
-        )
-    )
-    if comment:
-        ticket.comments.append(
-            TicketComment(
-                comment_id=f"CMT-{uuid4().hex[:8].upper()}",
-                author="reprocessing_controller",
-                text=comment,
-                created_at=now,
-            )
-        )
-    document_store.upsert_ticket(ticket)
-
-
-def _schedule_reprocessing_pipeline(
-    ticket_id: str,
-    *,
-    ready_summary: str,
-    final_run: WorkflowRun,
-) -> None:
-    lag = _stage_lag_seconds()
-    target_id = (
-        final_run.reprocess_result.target_document_id if final_run.reprocess_result else None
-    )
-
-    def advance_to_reprocessed() -> None:
-        _advance_ticket_stage(
-            ticket_id,
-            action="reprocess_completed",
-            summary=(
-                f"Document reprocessed successfully as {target_id}. "
-                "Ready for the ticket owner to review and resolve."
-                if target_id
-                else "Document reprocessing completed."
-            ),
-            final_run=final_run,
-            details={"target_document_id": target_id},
-            comment=(
-                f"Document reprocessed as {target_id}. Ready to resolve." if target_id else None
-            ),
-        )
-
-    def advance_to_ready() -> None:
-        _advance_ticket_stage(
-            ticket_id,
-            action="ready_for_reprocessing",
-            summary=ready_summary,
-            next_status=WorkflowStatus.READY_FOR_REPROCESSING,
-        )
-        timer = threading.Timer(lag, advance_to_reprocessed)
-        timer.daemon = True
-        timer.start()
-
-    timer = threading.Timer(lag, advance_to_ready)
-    timer.daemon = True
-    timer.start()
-
-
 @app.get("/api/workbench/assignees")
 def workbench_assignees() -> dict:
     return {
@@ -516,16 +424,13 @@ def approve_ticket(ticket_id: str, request: ApproveRequest) -> Ticket:
             detail="Only tickets awaiting approval can be approved.",
         )
 
-    # Compute the eventual outcome now (cheap and deterministic), but only
-    # expose the approval immediately. Master data creation and the reprocess
-    # batch run are simulated as delayed follow-on stages instead of resolving
-    # everything in this one request.
-    final_run = _rerun_ticket_workflow(ticket, approve=True)
+    # Human governance action only. Master-data creation and reprocessing are
+    # separate manual steps with separate actors.
     now = utc_now()
-    actor = request.actor.strip() or "Workbench User"
+    actor = request.actor.strip() or "Asha Rao — Master Data Governance Approver"
     note = (request.note or "").strip()
 
-    ticket.workflow_run = final_run.model_copy(
+    ticket.workflow_run = ticket.workflow_run.model_copy(
         update={"status": WorkflowStatus.APPROVED, "reprocess_result": None}
     )
     ticket.timeline.append(
@@ -534,13 +439,10 @@ def approve_ticket(ticket_id: str, request: ApproveRequest) -> Ticket:
             actor=actor,
             action="approval_recorded",
             details={"note": note},
-            summary=(
-                "Master data creation approved by a human reviewer. "
-                "Creation and reprocessing are now queued."
-            ),
+            summary="Master data creation approved by a human reviewer.",
         )
     )
-    comment_body = "Approved: master data creation signed off. Reprocessing queued."
+    comment_body = "Approved: master data creation signed off."
     if note:
         comment_body = f"{comment_body} {note}"
     ticket.comments.append(
@@ -554,17 +456,52 @@ def approve_ticket(ticket_id: str, request: ApproveRequest) -> Ticket:
     ticket.updated_at = now
     ticket.current_stage_started_at = now
     document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
 
-    if bool(final_run.reprocess_result and final_run.reprocess_result.success):
-        _schedule_reprocessing_pipeline(
-            ticket_id,
-            ready_summary=(
-                "Master data created and the source-to-target mapping maintained "
-                "in the target system. Ready for reprocessing."
-            ),
-            final_run=final_run,
+
+@app.post("/api/tickets/{ticket_id}/create-master-data")
+def create_ticket_master_data(ticket_id: str, request: CreateMasterDataRequest) -> Ticket:
+    ticket = _require_ticket(ticket_id)
+    if ticket.workflow_run.remediation_plan.action != ActionType.CREATE_TARGET_MASTER_DATA:
+        raise HTTPException(
+            status_code=400,
+            detail="Master data creation only applies to master-data remediation tickets.",
+        )
+    if ticket.workflow_run.status != WorkflowStatus.APPROVED:
+        raise HTTPException(
+            status_code=400,
+            detail="Master data can only be created after approval is recorded.",
         )
 
+    now = utc_now()
+    actor = request.actor.strip() or "Mina Patel — Master Data Specialist"
+    note = (request.note or "").strip()
+    ticket.workflow_run = ticket.workflow_run.model_copy(
+        update={"status": WorkflowStatus.READY_FOR_REPROCESSING, "reprocess_result": None}
+    )
+    ticket.timeline.append(
+        TicketEvent(
+            timestamp=now,
+            actor=actor,
+            action="master_data_created",
+            details={"note": note},
+            summary="Missing master data created in the target system.",
+        )
+    )
+    comment_body = "Master data created in the target system. Ready for reprocessing."
+    if note:
+        comment_body = f"{comment_body} {note}"
+    ticket.comments.append(
+        TicketComment(
+            comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+            author=actor,
+            text=comment_body,
+            created_at=now,
+        )
+    )
+    ticket.updated_at = now
+    ticket.current_stage_started_at = now
+    document_store.upsert_ticket(ticket)
     return enrich_ticket(ticket)
 
 
@@ -606,15 +543,12 @@ def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> 
         ticket, mapping_type
     )
 
-    # As with approve_ticket: compute the eventual outcome now, but only
-    # expose the mapping-maintained stage immediately. Reprocessing runs as a
-    # delayed follow-on to simulate the real batch-job lag.
-    final_run = _rerun_ticket_workflow(ticket, approve=False)
+    # Human governance action only. Reprocessing is a separate manual step.
     now = utc_now()
-    actor = request.actor.strip() or "Workbench User"
+    actor = request.actor.strip() or "Lars Becker — Source Mapping Steward"
     note = (request.note or "").strip()
 
-    ticket.workflow_run = final_run.model_copy(
+    ticket.workflow_run = ticket.workflow_run.model_copy(
         update={"status": WorkflowStatus.MAPPING_MAINTAINED, "reprocess_result": None}
     )
     ticket.timeline.append(
@@ -629,11 +563,11 @@ def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> 
             },
             summary=(
                 f"Source-to-target {mapping_type.replace('_', ' ')} mapping maintained: "
-                f"{source_value} → {target_value}. Reprocessing is now queued."
+                f"{source_value} → {target_value}."
             ),
         )
     )
-    comment_body = f"Mapping maintained ({source_value} → {target_value}). Reprocessing queued."
+    comment_body = f"Mapping maintained ({source_value} → {target_value}). Ready for reprocessing."
     if note:
         comment_body = f"{comment_body} {note}"
     ticket.comments.append(
@@ -647,17 +581,74 @@ def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> 
     ticket.updated_at = now
     ticket.current_stage_started_at = now
     document_store.upsert_ticket(ticket)
+    return enrich_ticket(ticket)
 
-    if bool(final_run.reprocess_result and final_run.reprocess_result.success):
-        _schedule_reprocessing_pipeline(
-            ticket_id,
-            ready_summary=(
-                f"Mapping confirmed in the target system ({source_value} → {target_value}). "
-                "Ready for reprocessing."
+
+@app.post("/api/tickets/{ticket_id}/reprocess")
+def reprocess_ticket(ticket_id: str, request: ReprocessRequest) -> Ticket:
+    ticket = _require_ticket(ticket_id)
+    plan_action = ticket.workflow_run.remediation_plan.action
+    expected_status = {
+        ActionType.CREATE_TARGET_MASTER_DATA: WorkflowStatus.READY_FOR_REPROCESSING,
+        ActionType.MAINTAIN_SOURCE_MAPPING: WorkflowStatus.MAPPING_MAINTAINED,
+    }.get(plan_action)
+    if expected_status is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This ticket does not have a manual reprocessing step.",
+        )
+    if ticket.workflow_run.status != expected_status:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Document can only be reprocessed from '{expected_status.value}'. "
+                f"Current stage: {ticket.workflow_run.status.value}."
             ),
-            final_run=final_run,
         )
 
+    final_run = _rerun_ticket_workflow(
+        ticket,
+        approve=plan_action == ActionType.CREATE_TARGET_MASTER_DATA,
+    )
+    now = utc_now()
+    actor = request.actor.strip() or "Owen Clarke — CFIN Reprocessing Operator"
+    note = (request.note or "").strip()
+    target_id = (
+        final_run.reprocess_result.target_document_id if final_run.reprocess_result else None
+    )
+
+    ticket.workflow_run = final_run
+    if final_run.agent_summary:
+        ticket.agent_summary = final_run.agent_summary
+    ticket.timeline.append(
+        TicketEvent(
+            timestamp=now,
+            actor=actor,
+            action="document_reprocessed",
+            details={"note": note, "target_document_id": target_id},
+            summary=(
+                f"Document reprocessed successfully as {target_id}."
+                if target_id
+                else "Document reprocessed successfully."
+            ),
+        )
+    )
+    comment_body = "Document reprocessed successfully."
+    if target_id:
+        comment_body = f"{comment_body} Target document: {target_id}."
+    if note:
+        comment_body = f"{comment_body} {note}"
+    ticket.comments.append(
+        TicketComment(
+            comment_id=f"CMT-{uuid4().hex[:8].upper()}",
+            author=actor,
+            text=comment_body,
+            created_at=now,
+        )
+    )
+    ticket.updated_at = now
+    ticket.current_stage_started_at = now
+    document_store.upsert_ticket(ticket)
     return enrich_ticket(ticket)
 
 
@@ -665,7 +656,7 @@ def maintain_ticket_mapping(ticket_id: str, request: MaintainMappingRequest) -> 
 async def upload_ticket_attachment(
     ticket_id: str,
     file: Annotated[UploadFile, File()],
-    actor: str = "Workbench User",
+    actor: str = "Nora Singh — CFIN Reconciliation Analyst",
     purpose: str = "resolution_proof",
 ) -> Ticket:
     filename = (file.filename or "upload").strip()

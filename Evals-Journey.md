@@ -53,7 +53,7 @@
 | Architecture docs | ✅ Done | `docs/ARCHITECTURE.md` |
 | Workbench UI (self-contained demo) | ✅ Done | Reset/seed/sweep in UI; `operator_status` model |
 | Runtime persistence | ✅ Done | `FINHUB_DATA_DIR`, SQLite, local/S3 attachments |
-| Human-in-the-loop actions in UI | ✅ Done | Approve & reprocess + maintain mapping close the loop in the workbench |
+| Human-in-the-loop actions in UI | ✅ Done | Persona-driven approve → create MD / maintain mapping → reprocess → proof + resolve |
 | Business-value dashboard | ✅ Done | Value at risk, SLA breaches, aging, automation rate (USD-eq demo FX) |
 | Summary feedback loop | ✅ Done | 👍/👎 → `summary_feedback.jsonl`; future golden-set candidates |
 | Shadow-mode agreement logging | 🟡 Collecting | `agent_shadow_log.jsonl` on LLM-path runs; report rate once volume exists |
@@ -271,6 +271,26 @@ During Promptfoo summary evals only, the `gpt-4o` LLM judge scores that summary 
 ---
 
 ## Session log
+
+### 2026-07-11c — Persona-driven manual governance milestones
+
+**Focus:** Replace the prior auto-advancing reprocessing pipeline with explicit human governance
+milestones tied to the ticket row status model.
+
+**Delivered:**
+
+- Removed the top pipeline stepper from the ticket detail UI; the activity log is now the single
+  journey view.
+- Preserved only `received` / `diagnosed` / `assigned` as auto-created activity-log entries. Later
+  entries are explicit human actions with role personas.
+- Split remediation into manual endpoints/actions:
+  `approve` → `create-master-data` → `reprocess` for master-data cases, and
+  `maintain-mapping` → `reprocess` for mapping cases.
+- Kept `operator_status=resolved` guarded by proof attachment + reason; proof upload/resolve uses a
+  reconciliation persona and is never auto-set.
+- Updated focused workbench/ticketing tests to assert the manual sequence and persona actors.
+
+---
 
 ### 2026-07-11b — Staged reprocessing pipeline (approve/mapping no longer auto-resolve)
 

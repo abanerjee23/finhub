@@ -202,7 +202,6 @@ def test_ticket_status_can_be_updated(tmp_path, monkeypatch) -> None:
 
 
 def test_resolved_status_requires_proof_attachment(tmp_path, monkeypatch) -> None:
-    import time
     from io import BytesIO
 
     from fastapi.testclient import TestClient
@@ -212,28 +211,25 @@ def test_resolved_status_requires_proof_attachment(tmp_path, monkeypatch) -> Non
 
     monkeypatch.setattr(document_store, "DB_PATH", tmp_path / "finhub.db")
     monkeypatch.setenv("FINHUB_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("WORKFLOW_STAGE_LAG_SECONDS", "0.1")
 
     bootstrap_demo(count=3, seed=11)
     ticket_id = load_tickets()[0].ticket_id
     client = TestClient(app)
 
-    # Seed=11 always yields MAINTAIN_SOURCE_MAPPING tickets, which must reach
-    # 'reprocessed' via Maintain Mapping before they can be manually resolved.
+    # Seed=11 always yields MAINTAIN_SOURCE_MAPPING tickets, which must be
+    # maintained (and reprocessed) before they can be manually resolved.
     maintained = client.post(
         f"/api/tickets/{ticket_id}/maintain-mapping",
         json={"target_value": "TGT-999", "actor": "Priya Shah"},
     )
     assert maintained.status_code == 200
+    assert maintained.json()["workflow_run"]["status"] == "mapping_maintained"
+    assert maintained.json()["operator_status"] != "resolved"
 
-    deadline = time.time() + 10
-    detail = None
-    while time.time() < deadline:
-        detail = client.get(f"/api/tickets/{ticket_id}").json()
-        if detail["workflow_run"]["status"] == "reprocessed":
-            break
-        time.sleep(0.05)
-    assert detail is not None and detail["workflow_run"]["status"] == "reprocessed"
+    reprocessed = client.post(f"/api/tickets/{ticket_id}/reprocess", json={})
+    assert reprocessed.status_code == 200
+    assert reprocessed.json()["workflow_run"]["status"] == "reprocessed"
+    assert reprocessed.json()["operator_status"] != "resolved"
 
     rejected = client.post(
         f"/api/tickets/{ticket_id}/transition",

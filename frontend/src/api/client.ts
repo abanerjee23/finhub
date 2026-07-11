@@ -216,7 +216,7 @@ export function transitionTicket(
 export function uploadTicketAttachment(
   ticketId: string,
   file: File,
-  actor = "Workbench User"
+  actor = "Nora Singh — CFIN Reconciliation Analyst"
 ): Promise<TicketDetail> {
   const form = new FormData();
   form.append("file", file);
@@ -305,6 +305,20 @@ export function approveTicket(
   });
 }
 
+export function createMasterData(
+  ticketId: string,
+  options?: { actor?: string; note?: string }
+): Promise<TicketDetail> {
+  return request(`/api/tickets/${ticketId}/create-master-data`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: options?.actor ?? "Mina Patel — Master Data Specialist",
+      note: options?.note?.trim() || undefined
+    })
+  });
+}
+
 export function maintainTicketMapping(
   ticketId: string,
   targetValue: string,
@@ -317,6 +331,20 @@ export function maintainTicketMapping(
       target_value: targetValue,
       source_value: options?.sourceValue?.trim() || undefined,
       actor: options?.actor ?? "Workbench User",
+      note: options?.note?.trim() || undefined
+    })
+  });
+}
+
+export function reprocessTicket(
+  ticketId: string,
+  options?: { actor?: string; note?: string }
+): Promise<TicketDetail> {
+  return request(`/api/tickets/${ticketId}/reprocess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: options?.actor ?? "Owen Clarke — CFIN Reprocessing Operator",
       note: options?.note?.trim() || undefined
     })
   });

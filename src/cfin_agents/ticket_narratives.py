@@ -144,8 +144,22 @@ def format_timeline_summary(event: TicketEvent, workflow_run: WorkflowRun | None
 
     if event.action == "reprocess_completed":
         if workflow_run and workflow_run.reprocess_result and workflow_run.reprocess_result.success:
-            return "Document reprocessed successfully. Ticket resolved."
-        return "Ticket closed."
+            return (
+                "Document reprocessed successfully. "
+                "Ready for the ticket owner to review and resolve."
+            )
+        return "Document reprocessing completed."
+
+    if event.action == "master_data_created":
+        return "Missing master data created in the target system."
+
+    if event.action == "document_reprocessed":
+        if workflow_run and workflow_run.reprocess_result and workflow_run.reprocess_result.success:
+            target_id = workflow_run.reprocess_result.target_document_id
+            if target_id:
+                return f"Document reprocessed successfully as {target_id}."
+            return "Document reprocessed successfully."
+        return "Document reprocessed."
 
     if event.to_status:
         stage = event.to_status.replace("_", " ")

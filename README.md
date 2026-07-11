@@ -6,16 +6,16 @@ For the business case and design narrative, see [`finhub.md`](finhub.md).
 
 ## Introduction
 
-The primary demo surface is the React **workbench** — a single-screen operations console where finance analysts triage failed documents after autonomous agents have already run. Seed the queue, run agent processing, inspect diagnoses, approve or maintain mappings to close out blocked documents, update ticket status, attach proof, and jump to Langfuse traces — no terminal required.
+The primary demo surface is the React **workbench** — a single-screen operations console where finance analysts triage failed documents after autonomous agents have already run. Seed the queue, run agent processing, inspect diagnoses, apply governed remediation steps with role-based personas, update ticket status, attach proof, and jump to Langfuse traces — no terminal required.
 
 **Live app:** [https://scalefinhub.up.railway.app/](https://scalefinhub.up.railway.app/)
 
-![FinHub workbench — Business Impact panel, ticket detail with agent diagnosis and Approve & Reprocess action, analytics sidebar, and searchable ticket queue](docs/images/finhub-workbench.png)
+![FinHub workbench — ticket detail after manual reprocessing with activity log, persona comments, and resolve-with-proof guidance](docs/images/finhub-workbench.png)
 
 **Demo loop:**
 
 ```text
-Reset & seed queue  →  Run agent processing  →  Approve / maintain mapping  →  Triage tickets  →  View trace in Langfuse
+Reset & seed queue  →  Run agent processing  →  Apply governed remediation steps  →  Resolve with proof  →  View trace in Langfuse
 ```
 
 | UI area | Purpose |
@@ -23,10 +23,63 @@ Reset & seed queue  →  Run agent processing  →  Approve / maintain mapping  
 | **Workbench Controls** | Seed count, reset queue, sweep batch size (runs as a background job with a progress bar), refresh |
 | **Business Impact** | Open value at risk / total value failed (USD-equivalent), by company code and source system (click to filter), SLA breaches, ticket aging, automation rate |
 | **Analytics** | Total/active tickets, status breakdown, owner chart, stage times |
-| **Ticket detail** | Agent diagnosis hero (execution-mode badge, 👍/👎 summary feedback), **Approve & Reprocess** / **Maintain Mapping** actions, assignee reassignment, comments, proof uploads, activity log, **View trace in Langfuse** (when configured) |
+| **Ticket detail** | Agent diagnosis hero (execution-mode badge, 👍/👎 summary feedback), governed workflow actions (approve, create master data, maintain mapping, reprocess), assignee reassignment, comments, proof uploads, activity log, **View trace in Langfuse** (when configured) |
 | **Search Tickets** | Filter and update `operator_status` inline, business-filter chips, bulk status moves |
 
-Operator statuses: **Assigned**, **In Progress**, **Blocked** (requires comment), **Resolved** (requires proof attachment). Agent policy outcomes (`needs_approval`, `blocked`, etc.) live in `workflow_run` and the diagnosis summary. `needs_approval` tickets get an **Approve & Reprocess** action; missing-mapping (`MP_*`) tickets get a **Maintain Mapping** action — both resolve the ticket in place instead of requiring the CLI.
+### Governed remediation workflow
+
+The activity log is tied to each ticket row in **Search Tickets**. Only the first three journey entries are system-generated at ticket creation:
+
+| Auto (agent/ticketing) | Manual (human governance) |
+|------------------------|---------------------------|
+| Received | Approve master data creation |
+| Diagnosed | Create master data in target |
+| Assigned | Maintain source-to-target mapping |
+| | Reprocess document |
+| | Block ticket (comment required) |
+| | Resolve with proof + reason |
+
+**Operator statuses** (`Assigned`, `In Progress`, `Blocked`, `Resolved`) live on the ticket row and are changed explicitly — they are not auto-advanced by the remediation pipeline.
+
+**Workflow milestones** (`needs_approval`, `approved`, `ready_for_reprocessing`, `reprocessed`, etc.) live on `workflow_run.status` and advance only when a human clicks the corresponding action.
+
+#### Role personas (demo defaults)
+
+| Persona | Typical action |
+|---------|----------------|
+| **Asha Rao — Master Data Governance Approver** | Approve master data creation |
+| **Mina Patel — Master Data Specialist** | Create missing master data in the target system |
+| **Lars Becker — Source Mapping Steward** | Maintain source-to-target mapping |
+| **Owen Clarke — CFIN Reprocessing Operator** | Run governed reprocessing (`workflow_run.status` → `reprocessed`) |
+| **Ticket assignee** | Move queue status to In Progress; review evidence |
+| **Nora Singh — CFIN Reconciliation Analyst** | Upload proof and set **Resolved** (proof + reason required) |
+
+Not every document needs every role — mapping tickets skip approval/master-data steps; closed-period tickets have no reprocess path.
+
+#### Master-data path (`MD_*`)
+
+```text
+needs_approval → [Approve] → approved
+              → [Create Master Data] → ready_for_reprocessing
+              → [Reprocess Document] → reprocessed
+              → reprocessing operator shares evidence with ticket owner
+              → ticket owner uploads proof → Resolved
+```
+
+#### Mapping path (`MP_*`)
+
+```text
+needs_mapping → [Maintain Mapping] → mapping_maintained
+             → [Reprocess Document] → reprocessed
+             → evidence handoff → proof upload → Resolved
+```
+
+#### Reprocessed vs Resolved
+
+- **Reprocessed** — operational outcome: the document landed in Central Finance under policy control. Recorded in the activity log when the reprocessing operator runs **Reprocess Document**.
+- **Resolved** — governance closure: the ticket owner (or reconciliation analyst) attests that shared evidence is sufficient, uploads proof, and sets **Current Status** to Resolved with a closing note.
+
+This separation mirrors real finance ops: one team runs the batch/repost; another owns exception closure.
 
 Architecture details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -83,7 +136,7 @@ Full walkthrough: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 Same as local, no terminal required:
 
 ```text
-Reset & seed queue  →  Run agent processing  →  Triage tickets  →  View trace in Langfuse
+Reset & seed queue  →  Run agent processing  →  Governed remediation (personas)  →  Resolve with proof  →  View trace in Langfuse
 ```
 
 ### Local vs production
@@ -133,7 +186,6 @@ The **workbench UI** (`Reset & seed` / `Run agent processing`) is the recommende
 - `SUMMARY_JUDGE_MODEL`: model for Promptfoo LLM judge evals, defaults to `gpt-4o` (evals only).
 - `DISABLE_LLM`: set to `1` to force deterministic execution (no agent orchestration).
 - `CONFIDENCE_REVIEW_THRESHOLD`: diagnosis confidence below this value routes to human review (`needs_approval`), defaults to `0.5` (the deterministic classifier emits 0.8-0.95, so the default never changes existing eval outcomes).
-- `WORKFLOW_STAGE_LAG_SECONDS`: seconds between each staged transition in the workbench's human-in-the-loop reprocessing pipeline (`approved`/`mapping_maintained` → `ready_for_reprocessing` → `reprocessed`), defaults to `6`. Simulates the real-world lag between a sign-off and the document landing in the target system instead of resolving instantly.
 - `FINHUB_DATA_DIR`: directory for SQLite DB and local attachments (default: `data/synthetic`; on Railway use `/data/finhub` with a mounted volume).
 - `RAILWAY_RUN_UID`: set to `0` on Railway when using Docker + volumes (Railway-only; not in local `.env`).
 - `STORAGE_BACKEND`: `local` (default) or `s3` for attachment blob storage.

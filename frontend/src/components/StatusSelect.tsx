@@ -7,7 +7,7 @@ export function StatusSelect({
   ticket,
   onStatusChange
 }: {
-  ticket: Pick<TicketListItem, "ticket_id" | "operator_status">;
+  ticket: Pick<TicketListItem, "ticket_id" | "operator_status" | "assignee">;
   onStatusChange: (
     ticketId: string,
     status: string,
@@ -43,7 +43,9 @@ export function StatusSelect({
       return;
     }
 
-    void applyStatus(nextStatus);
+    void applyStatus(nextStatus, {
+      actor: nextStatus === "in_progress" ? ticket.assignee : "Workbench User"
+    });
   }
 
   return (
